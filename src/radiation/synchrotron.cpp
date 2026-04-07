@@ -388,6 +388,17 @@ SynPhotonGrid generate_syn_photons(Shock const& shock, SynElectronGrid const& el
     return photons;
 }
 
+SynPhotonGrid generate_syn_photons(Shock const& shock, SynElectronGrid const& electrons, Coord const& coord,
+                                   MediumVariant const& medium) {
+    auto [phi_size, theta_size, t_size] = shock.shape();
+
+    SynPhotonGrid photons({phi_size, theta_size, t_size});
+
+    generate_syn_photons(photons, shock, electrons, coord, medium);
+
+    return photons;
+}
+
 void generate_syn_photons(SynPhotonGrid& photons, Shock const& shock, SynElectronGrid const& electrons,
                           Coord const& coord) {
     auto [phi_size, theta_size, t_size] = shock.shape();
@@ -408,6 +419,44 @@ void generate_syn_photons(SynPhotonGrid& photons, Shock const& shock, SynElectro
 
                 const Real B = shock.B(i, j, k);
 
+                ph.nu_M = compute_syn_freq(elec.gamma_M, B);
+                ph.nu_m = compute_syn_freq(elec.gamma_m, B);
+                ph.nu_c = compute_syn_freq(elec.gamma_c, B);
+                ph.nu_a = compute_syn_freq(elec.gamma_a, B);
+                ph.I_nu_max = compute_syn_I_peak(B, elec.p, elec.column_den);
+
+                ph.build();
+            }
+        }
+    }
+
+    broadcast_symmetry(photons, coord);
+}
+
+void generate_syn_photons(SynPhotonGrid& photons, Shock const& shock, SynElectronGrid const& electrons,
+                          Coord const& coord, MediumVariant const& medium) {
+    auto [phi_size, theta_size, t_size] = shock.shape();
+
+    photons.resize({phi_size, theta_size, t_size});
+
+    const size_t phi_compute = (coord.symmetry != Symmetry::structured) ? 1 : phi_size;
+
+    for (size_t i = 0; i < phi_compute; ++i) {
+        const Real phi = coord.phi(i);
+        for (size_t j : coord.theta_reps) {
+            for (size_t k = 0; k < t_size; ++k) {
+                auto& ph = photons(i, j, k);
+                auto& elec = electrons(i, j, k);
+                ph.p = elec.p;
+                ph.Ys = elec.Ys;
+                ph.Y_c = elec.Y_c;
+                ph.regime = elec.regime;
+
+                const Real B = shock.B(i, j, k);
+                const Real theta = shock.theta(i, j, k);
+                const Real r = shock.r(i, j, k);
+
+                ph.k_eff = medium_local_k(medium, phi, theta, r);
                 ph.nu_M = compute_syn_freq(elec.gamma_M, B);
                 ph.nu_m = compute_syn_freq(elec.gamma_m, B);
                 ph.nu_c = compute_syn_freq(elec.gamma_c, B);

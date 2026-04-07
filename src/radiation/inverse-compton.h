@@ -609,10 +609,60 @@ void IC_cooling(ElectronGrid<Electrons>& electrons, PhotonGrid<Photons>& photons
     generate_syn_photons(photons, shock, electrons, coord);
 }
 
+template <typename Electrons, typename Photons, typename Updater>
+void IC_cooling(ElectronGrid<Electrons>& electrons, PhotonGrid<Photons>& photons, Shock const& shock,
+                Coord const& coord, MediumVariant const& medium, Updater&& update_gamma_c, Real redshift = 0.0) {
+    const size_t phi_size = electrons.shape()[0];
+    const size_t t_size = electrons.shape()[2];
+
+    const size_t phi_compute = (coord.symmetry != Symmetry::structured) ? 1 : phi_size;
+
+    for (size_t i = 0; i < phi_compute; ++i) {
+        for (size_t j : coord.theta_reps) {
+            const size_t k_inj = shock.injection_idx(i, j);
+
+            for (size_t k = 0; k < t_size; ++k) {
+                const Real t_com = shock.t_comv(i, j, k);
+                const Real B = shock.B(i, j, k);
+
+                auto& elec = electrons(i, j, k);
+                auto& Ys = elec.Ys;
+                const Real p = elec.p;
+                const Real gamma_c_last = electrons(i, j, k > 0 ? k - 1 : 0).gamma_c;
+
+                update_gamma_c(elec.gamma_c, Ys, shock.rad, B, t_com, elec.gamma_m, gamma_c_last, redshift);
+
+                update_gamma_M(elec.gamma_M, Ys, p, B);
+
+                if (k >= k_inj) {
+                    auto const& inj = electrons(i, j, k_inj - 1);
+                    const Real dt_comv = t_com - shock.t_comv(i, j, k_inj - 1);
+                    elec.gamma_c = cool_after_crossing(inj.gamma_c, inj.gamma_m, elec.gamma_m, t_com, B, 0);
+
+                    elec.gamma_M = cool_after_crossing(inj.gamma_M, inj.gamma_m, elec.gamma_m, dt_comv, B, 0);
+                }
+
+                const Real I_nu_peak = compute_syn_I_peak(B, p, elec.column_den);
+                elec.gamma_a = compute_syn_gamma_a(B, I_nu_peak, elec.gamma_m, elec.gamma_c, elec.gamma_M, p);
+                elec.regime = determine_regime(elec.gamma_a, elec.gamma_c, elec.gamma_m);
+                elec.Y_c = Ys.gamma_spectrum(elec.gamma_c);
+            }
+        }
+    }
+    broadcast_symmetry(electrons, coord);
+    generate_syn_photons(photons, shock, electrons, coord, medium);
+}
+
 template <typename Electrons, typename Photons>
 void Thomson_cooling(ElectronGrid<Electrons>& electrons, PhotonGrid<Photons>& photons, Shock const& shock,
                      Coord const& coord, Real redshift) {
     IC_cooling(electrons, photons, shock, coord, update_gamma_c_Thomson, redshift);
+}
+
+template <typename Electrons, typename Photons>
+void Thomson_cooling(ElectronGrid<Electrons>& electrons, PhotonGrid<Photons>& photons, Shock const& shock,
+                     Coord const& coord, MediumVariant const& medium, Real redshift) {
+    IC_cooling(electrons, photons, shock, coord, medium, update_gamma_c_Thomson, redshift);
 }
 
 template <typename Electrons, typename Photons>
@@ -622,9 +672,21 @@ void KN_cooling(ElectronGrid<Electrons>& electrons, PhotonGrid<Photons>& photons
 }
 
 template <typename Electrons, typename Photons>
+void KN_cooling(ElectronGrid<Electrons>& electrons, PhotonGrid<Photons>& photons, Shock const& shock,
+                Coord const& coord, MediumVariant const& medium, Real redshift) {
+    IC_cooling(electrons, photons, shock, coord, medium, update_gamma_c_KN, redshift);
+}
+
+template <typename Electrons, typename Photons>
 void CMB_cooling(ElectronGrid<Electrons>& electrons, PhotonGrid<Photons>& photons, Shock const& shock,
                  Coord const& coord, Real redshift) {
     IC_cooling(electrons, photons, shock, coord, update_gamma_c_CMB, redshift);
+}
+
+template <typename Electrons, typename Photons>
+void CMB_cooling(ElectronGrid<Electrons>& electrons, PhotonGrid<Photons>& photons, Shock const& shock,
+                 Coord const& coord, MediumVariant const& medium, Real redshift) {
+    IC_cooling(electrons, photons, shock, coord, medium, update_gamma_c_CMB, redshift);
 }
 
 template <typename Photon>

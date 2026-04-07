@@ -69,7 +69,7 @@ void lc_gen(std::string folder_name, bool out = false) {
 
     auto syn_e = generate_syn_electrons(f_shock, coord);
 
-    auto syn_ph = generate_syn_photons(f_shock, syn_e, coord);
+    auto syn_ph = generate_syn_photons(f_shock, syn_e, coord, medium);
 
     if (out) {
         write_npz("coord", coord);

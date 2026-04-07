@@ -6,6 +6,7 @@
 //                            |___/                                            |___/
 
 #pragma once
+#include <algorithm>
 #include <cmath>
 #include <utility>
 #include <variant>
@@ -146,6 +147,31 @@ using MediumVariant = std::variant<ISM, Wind, Medium>;
 /// Helper: evaluate rho on a MediumVariant (for non-hot-path code)
 inline Real medium_rho(MediumVariant const& mv, Real phi, Real theta, Real r) {
     return std::visit([&](auto const& m) { return m.rho(phi, theta, r); }, mv);
+}
+
+template <typename MediumT>
+inline Real medium_local_k(MediumT const& medium, Real phi, Real theta, Real r) {
+    const Real r_safe = std::max(r, 1e-30 * unit::cm);
+    const Real r_lo = std::max(r_safe * 0.95, 1e-30 * unit::cm);
+    const Real r_hi = r_safe * 1.05;
+
+    const Real rho_lo = medium.rho(phi, theta, r_lo);
+    const Real rho_hi = medium.rho(phi, theta, r_hi);
+    if (!(rho_lo > 0) || !(rho_hi > 0) || !std::isfinite(rho_lo) || !std::isfinite(rho_hi)) {
+        return 2.0;
+    }
+
+    const Real log_r_span = std::log(r_hi) - std::log(r_lo);
+    if (log_r_span == 0) {
+        return 2.0;
+    }
+
+    const Real k_eff = -(std::log(rho_hi) - std::log(rho_lo)) / log_r_span;
+    return std::isfinite(k_eff) ? k_eff : 2.0;
+}
+
+inline Real medium_local_k(MediumVariant const& mv, Real phi, Real theta, Real r) {
+    return std::visit([&](auto const& m) { return medium_local_k(m, phi, theta, r); }, mv);
 }
 
 /**

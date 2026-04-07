@@ -250,16 +250,16 @@ void PyModel::single_evo_details(Shock const& shock, Coord const& coord, Observe
 
     auto syn_e = generate_syn_electrons(shock, coord);
 
-    auto syn_ph = generate_syn_photons(shock, syn_e, coord);
+    auto syn_ph = generate_syn_photons(shock, syn_e, coord, medium_);
 
     if (rad.ssc) {
         if (rad.kn) {
-            KN_cooling(syn_e, syn_ph, shock, coord, obs_setup.z);
+            KN_cooling(syn_e, syn_ph, shock, coord, medium_, obs_setup.z);
         } else {
-            Thomson_cooling(syn_e, syn_ph, shock, coord, obs_setup.z);
+            Thomson_cooling(syn_e, syn_ph, shock, coord, medium_, obs_setup.z);
         }
     } else if (rad.rad.cmb_cooling) {
-        CMB_cooling(syn_e, syn_ph, shock, coord, obs_setup.z);
+        CMB_cooling(syn_e, syn_ph, shock, coord, medium_, obs_setup.z);
     }
     save_electron_details(syn_e, details);
     save_photon_details(syn_ph, details, shock);
@@ -480,16 +480,16 @@ auto PyModel::sky_image(PyArray const& t_obs, double nu_obs, double fov, size_t 
         observer.observe(coord, shock, obs_setup.lumi_dist, obs_setup.z);
 
         auto syn_e = generate_syn_electrons(shock, coord);
-        auto syn_ph = generate_syn_photons(shock, syn_e, coord);
+        auto syn_ph = generate_syn_photons(shock, syn_e, coord, medium_);
 
         if (rad.ssc) {
             if (rad.kn) {
-                KN_cooling(syn_e, syn_ph, shock, coord, obs_setup.z);
+                KN_cooling(syn_e, syn_ph, shock, coord, medium_, obs_setup.z);
             } else {
-                Thomson_cooling(syn_e, syn_ph, shock, coord, obs_setup.z);
+                Thomson_cooling(syn_e, syn_ph, shock, coord, medium_, obs_setup.z);
             }
         } else if (rad.rad.cmb_cooling) {
-            CMB_cooling(syn_e, syn_ph, shock, coord, obs_setup.z);
+            CMB_cooling(syn_e, syn_ph, shock, coord, medium_, obs_setup.z);
         }
 
         auto img = observer.sky_image(coord, shock, t_arr, nu_cgs, syn_ph, npixel, pix_size);

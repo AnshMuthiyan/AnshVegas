@@ -831,19 +831,19 @@ void PyModel::single_shock_emission(Shock const& shock, Coord const& coord, Arra
 
     auto syn_ph = [&] {
         AFTERGLOW_PROFILE_SCOPE(syn_photons);
-        return generate_syn_photons(shock, syn_e, coord);
+        return generate_syn_photons(shock, syn_e, coord, medium_);
     }();
 
     if (rad.ssc) {
         AFTERGLOW_PROFILE_SCOPE(cooling);
         if (rad.kn) {
-            KN_cooling(syn_e, syn_ph, shock, coord, obs_setup.z);
+            KN_cooling(syn_e, syn_ph, shock, coord, medium_, obs_setup.z);
         } else {
-            Thomson_cooling(syn_e, syn_ph, shock, coord, obs_setup.z);
+            Thomson_cooling(syn_e, syn_ph, shock, coord, medium_, obs_setup.z);
         }
     } else if (rad.rad.cmb_cooling) {
         AFTERGLOW_PROFILE_SCOPE(cooling);
-        CMB_cooling(syn_e, syn_ph, shock, coord, obs_setup.z);
+        CMB_cooling(syn_e, syn_ph, shock, coord, medium_, obs_setup.z);
     }
 
     {

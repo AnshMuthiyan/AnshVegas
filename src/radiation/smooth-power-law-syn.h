@@ -22,6 +22,7 @@ struct SmoothPowerLawSyn {
     Real nu_a{0};     ///< Self-absorption frequency
     Real nu_M{0};     ///< Maximum photon frequency
     Real p{2.3};      ///< Power-law index for the electron energy distribution
+    Real k_eff{2.0};  ///< Local effective density slope used for GS02-style smoothing
 
     Real log2_I_nu_max{0}; ///< Log2 of I_nu_max (for computational efficiency)
     Real log2_nu_m{0};     ///< Log2 of nu_m
@@ -63,18 +64,16 @@ struct SmoothPowerLawSyn {
   private:
     Real log2_norm_{0};       ///< Cached spectral coefficient 0 in log2
     Real log2_thick_norm_{0}; ///< Cached spectral coefficient 1 in log2
-    Real smooth_m_fast_{1};   ///<
-    Real smooth_c_fast_{1};   ///<
-    Real smooth_m_slow_{1};   ///<
-    Real smooth_c_slow_{1};   ///<
     Real smooth_a_;           ///<
-
-    // Precomputed s*(beta_lo - beta_hi) for broken power law transitions
-    Real diff_slope_m_slow_{0}; ///< smooth_m_slow_ * (1/3 - (1-p)/2)
-    Real diff_slope_c_slow_{0}; ///< smooth_c_slow_ * ((1-p)/2 - (-p/2))
-    Real diff_slope_m_fast_{0}; ///< smooth_m_fast_ * (1/3 - (-1/2))
-    Real diff_slope_c_fast_{0}; ///< smooth_c_fast_ * (-1/2 - (-p/2))
     Real inv_nu_M_{0};          ///< Cached 1/nu_M for division optimization
+    Real log2_nu12_{0};         ///< Lower optically thin break
+    Real log2_nu23_{0};         ///< Upper optically thin break
+    Real b1_{1.0 / 3.0};        ///< Low-frequency optically-thin slope
+    Real b2a_{-0.5};            ///< Middle slope below the upper break
+    Real b2b_{-0.5};            ///< Middle slope as seen by the upper break
+    Real b3_{-1.0};             ///< High-frequency optically-thin slope
+    Real s12_{1};               ///< Lower optically-thin smoothing parameter
+    Real s23_{1};               ///< Upper optically-thin smoothing parameter
 
     /**
      * <!-- ************************************************************************************** -->

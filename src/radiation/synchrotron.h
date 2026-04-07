@@ -118,6 +118,9 @@ void generate_syn_electrons(SynElectronGrid& electrons, Shock const& shock, Coor
  */
 SynPhotonGrid generate_syn_photons(Shock const& shock, SynElectronGrid const& electrons, Coord const& coord);
 
+SynPhotonGrid generate_syn_photons(Shock const& shock, SynElectronGrid const& electrons, Coord const& coord,
+                                   MediumVariant const& medium);
+
 /**
  * <!-- ************************************************************************************** -->
  * @brief Populates an existing photon grid with values based on shock and electron grid
@@ -129,6 +132,9 @@ SynPhotonGrid generate_syn_photons(Shock const& shock, SynElectronGrid const& el
  */
 void generate_syn_photons(SynPhotonGrid& photons, Shock const& shock, SynElectronGrid const& electrons,
                           Coord const& coord);
+
+void generate_syn_photons(SynPhotonGrid& photons, Shock const& shock, SynElectronGrid const& electrons,
+                          Coord const& coord, MediumVariant const& medium);
 
 /**
  * <!-- ************************************************************************************** -->

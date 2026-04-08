@@ -111,11 +111,8 @@ JetVariant PyTwoComponentJet(Real theta_c, Real E_iso, Real Gamma0, Real theta_w
     return jet;
 }
 
-Medium PyISM(Real n_ism) {
-    Medium medium;
-    medium.rho = [=](Real phi, Real theta, Real r) { return n_ism * 1.67e-24; };
-
-    return medium;
+ISM PyISM(Real n_ism) {
+    return ISM(n_ism);
 }
 
 Medium PyWind(Real A_star, Real n_ism, Real n0, Real k) {

@@ -181,6 +181,8 @@ PYBIND11_MODULE(VegasAfterglowC, m) {
     
     m.def("powerLaw", &PyPowerLaw, py::arg("n0"), py::arg("k"), py::arg("r0") = 1e17, py::arg("X") = 0.7);
 
+    m.def("logscale_screen", &logscale_screen, py::arg("data"), py::arg("num_order"));
+
     // Observer bindings
     py::class_<PyObserver>(m, "Observer")
         .def(py::init<Real, Real, Real, Real>(), py::arg("lumi_dist"), py::arg("z"), py::arg("theta_obs"),
@@ -408,95 +410,4 @@ PYBIND11_MODULE(VegasAfterglowC, m) {
         .def_readonly("rvs", &PyDetails::rvs)
         .def("__repr__", &PyDetails::repr);
 
-    //========================================================================================================
-    //                                 Utilities
-    //========================================================================================================
-    // Parameters for MCMC modeling
-    py::class_<Params>(m, "ModelParams")
-        .def(py::init<>())
-        .def_readwrite("theta_v", &Params::theta_v)
-
-        .def_readwrite("n_ism", &Params::n_ism)
-        .def_readwrite("n0", &Params::n0)
-        .def_readwrite("A_star", &Params::A_star)
-        .def_readwrite("k_m", &Params::k_m)
-
-        .def_readwrite("E_iso", &Params::E_iso)
-        .def_readwrite("Gamma0", &Params::Gamma0)
-        .def_readwrite("theta_c", &Params::theta_c)
-        .def_readwrite("k_e", &Params::k_e)
-        .def_readwrite("k_g", &Params::k_g)
-        .def_readwrite("s", &Params::s)
-        .def_readwrite("tau", &Params::duration)
-
-        .def_readwrite("E_iso_w", &Params::E_iso_w)
-        .def_readwrite("Gamma0_w", &Params::Gamma0_w)
-        .def_readwrite("theta_w", &Params::theta_w)
-
-        .def_readwrite("L0", &Params::L0)
-        .def_readwrite("t0", &Params::t0)
-        .def_readwrite("q", &Params::q)
-
-        .def_readwrite("p", &Params::p)
-        .def_readwrite("eps_e", &Params::eps_e)
-        .def_readwrite("eps_B", &Params::eps_B)
-        .def_readwrite("xi_e", &Params::xi_e)
-
-        .def_readwrite("p_r", &Params::p_r)
-        .def_readwrite("eps_e_r", &Params::eps_e_r)
-        .def_readwrite("eps_B_r", &Params::eps_B_r)
-        .def_readwrite("xi_e_r", &Params::xi_e_r);
-
-    // Parameters for modeling that are not used in the MCMC
-    py::class_<ConfigParams>(m, "Setups")
-        .def(py::init<>())
-        .def_readwrite("lumi_dist", &ConfigParams::lumi_dist)
-        .def_readwrite("z", &ConfigParams::z)
-        .def_readwrite("medium", &ConfigParams::medium)
-        .def_readwrite("jet", &ConfigParams::jet)
-        .def_readwrite("t_resol", &ConfigParams::t_resol)
-        .def_readwrite("phi_resol", &ConfigParams::phi_resol)
-        .def_readwrite("theta_resol", &ConfigParams::theta_resol)
-        .def_readwrite("rtol", &ConfigParams::rtol)
-        .def_readwrite("rvs_shock", &ConfigParams::rvs_shock)
-        .def_readwrite("fwd_ssc", &ConfigParams::fwd_ssc)
-        .def_readwrite("rvs_ssc", &ConfigParams::rvs_ssc)
-        .def_readwrite("ssc_cooling", &ConfigParams::ssc_cooling)
-        .def_readwrite("kn", &ConfigParams::kn)
-        .def_readwrite("magnetar", &ConfigParams::magnetar);
-
-    // MultiBandData bindings
-    py::class_<MultiBandData>(m, "ObsData")
-        .def(py::init<>())
-
-        .def("add_flux_density", &MultiBandData::add_flux_density, py::arg("nu"), py::arg("t"), py::arg("f_nu"),
-             py::arg("err"), py::arg("weights") = py::none(),
-             "Add flux density data. All quantities in CGS units: nu [Hz], t [s], f_nu [erg/cm²/s/Hz]")
-
-        .def("add_flux", &MultiBandData::add_flux, py::arg("nu_min"), py::arg("nu_max"), py::arg("num_points"),
-             py::arg("t"), py::arg("flux"), py::arg("err"), py::arg("weights") = py::none(),
-             "Add broadband flux data. All quantities in CGS units: nu [Hz], t [s], flux [erg/cm²/s]")
-
-        .def("add_spectrum", &MultiBandData::add_spectrum, py::arg("t"), py::arg("nu"), py::arg("f_nu"), py::arg("err"),
-             py::arg("weights") = py::none(),
-             "Add spectrum data. All quantities in CGS units: t [s], nu [Hz], f_nu [erg/cm²/s/Hz]")
-
-        .def_static("logscale_screen", &MultiBandData::logscale_screen, py::arg("t"), py::arg("data_density"))
-
-        .def("data_points_num", &MultiBandData::data_points_num);
-
-    // MultiBandModel bindings
-    py::class_<MultiBandModel>(m, "VegasMC")
-        .def(py::init<MultiBandData const&>(), py::arg("obs_data"))
-
-        .def("set", &MultiBandModel::configure, py::arg("param"))
-
-        .def("estimate_chi2", &MultiBandModel::estimate_chi2, py::arg("param"),
-             py::call_guard<py::gil_scoped_release>())
-
-        .def("flux_density_grid", &MultiBandModel::flux_density_grid, py::arg("param"), py::arg("t"), py::arg("nu"),
-             py::call_guard<py::gil_scoped_release>())
-
-        .def("flux", &MultiBandModel::flux, py::arg("param"), py::arg("t"), py::arg("nu_min"), py::arg("nu_max"),
-             py::arg("num_points"), py::call_guard<py::gil_scoped_release>());
 }

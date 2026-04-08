@@ -174,7 +174,7 @@ PYBIND11_MODULE(VegasAfterglowC, m) {
     m.def(
         "Wind",
         [](Real A_star, std::optional<Real> n_ism, std::optional<Real> n0, Real k_m) -> MediumVariant {
-            return PyWind(A_star, n_ism, n0, k_m);
+            return PyWind(A_star, n_ism.value_or(0), n0.value_or(con::inf), k_m);
         },
         py::arg("A_star"), py::arg("n_ism") = py::none(), py::arg("n0") = py::none(), py::arg("k_m") = 2);
 

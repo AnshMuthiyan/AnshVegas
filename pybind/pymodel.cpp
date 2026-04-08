@@ -157,12 +157,22 @@ void convert_unit_jet(JetVariant& jet) {
                     return dm_dt_cgs(phi, theta, t / unit::sec) * (unit::g / (4 * con::pi * unit::sec));
                 };
 
-    jet.T0 *= unit::sec;
+                j.T0 *= unit::sec;
+            }
+        },
+        jet);
+}
 
-    auto rho_cgs = medium.rho; // number density from python side
-    medium.rho = [=](Real phi, Real theta, Real r) { //SUPPOSEDLY WRONG COMMENTING
-        return rho_cgs(phi, theta, r / unit::cm) * (unit::g / unit::cm3); // convert to density
-    };
+void convert_unit_medium(MediumVariant& medium) {
+    // ISM and Wind are C++ native types already in internal units — no conversion needed.
+    // Medium holds a Python-side CGS lambda: r in cm, returns g/cm³.
+    // Wrap it so internal-unit r is converted to cm on input and output is scaled to internal units.
+    if (auto* m = std::get_if<Medium>(&medium)) {
+        auto rho_cgs = m->rho;
+        m->rho = [=](Real phi, Real theta, Real r) {
+            return rho_cgs(phi, theta, r / unit::cm) * (unit::g / unit::cm3);
+        };
+    }
 }
 
 void save_shock_details(Shock const& shock, PyShock& details) {

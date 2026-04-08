@@ -23,61 +23,9 @@ The Python API is organized into several core components:
 Core Classes
 ------------
 
-.. _api-obsdata:
-
-ObsData
-^^^^^^^
-
-.. autoclass:: VegasAfterglow.ObsData
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-The `ObsData` class is used to store and manage observational data, including light curves and spectra. It provides methods to add observational data from various sources.
-
-Example:
-
-.. code-block:: python
-
-    from VegasAfterglow import ObsData
-
-    # Create an instance to store observational data
-    data = ObsData()
-
-    # Add light curve data
-    data.add_flux_density(nu=4.84e14, t=time_data, f_nu=flux_data, err=flux_error)  # All quantities in CGS units
-
-    # Add spectrum data
-    data.add_spectrum(t=3000, nu=nu_data, f_nu=spectrum_data, err=spectrum_error)  # All quantities in CGS units
-
-.. _api-setups:
-
-Setups
-^^^^^^
-
-.. autoclass:: VegasAfterglow.Setups
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-The `Setups` class defines global properties and environment settings for the model. These settings remain fixed during the MCMC process.
-
-Example:
-
-.. code-block:: python
-
-    from VegasAfterglow import Setups
-
-    # Create configuration
-    cfg = Setups()
-
-    # Source properties
-    cfg.lumi_dist = 3.364e28    # Luminosity distance [cm]
-    cfg.z = 1.58               # Redshift
-
-    # Physical model configuration
-    cfg.medium = "wind"        # Ambient medium: "wind", "ISM", or "user"
-    cfg.jet = "powerlaw"       # Jet structure: "powerlaw", "gaussian", "tophat", or "user"
+.. note::
+   The classes below (``Fitter``, ``ParamDef``, ``Scale``) require the MCMC extra:
+   ``pip install VegasAfterglow[mcmc]``
 
 .. _api-modelparams:
 
@@ -122,14 +70,14 @@ Example:
     from VegasAfterglow import ParamDef, Scale
 
     mc_params = [
-        ParamDef("E_iso",   1e50,  1e54,  Scale.LOG),       # Isotropic energy [erg]
-        ParamDef("Gamma0",     5,  1000,  Scale.LOG),       # Lorentz factor at the core
-        ParamDef("theta_c",  0.0,   0.5,  Scale.LINEAR),    # Core half-opening angle [rad]
-        ParamDef("theta_v",  0.0,   0.0,  Scale.FIXED),     # Viewing angle [rad]
-        ParamDef("p",          2,     3,  Scale.LINEAR),    # Shocked electron power law index
-        ParamDef("eps_e",   1e-2,   0.5,  Scale.LOG),       # Electron energy fraction
-        ParamDef("eps_B",   1e-4,   0.5,  Scale.LOG),       # Magnetic field energy fraction
-        ParamDef("A_star",  1e-3,     1,  Scale.LOG),       # Wind parameter
+        ParamDef("E_iso",   1e50,  1e54,  Scale.log),       # Isotropic energy [erg]
+        ParamDef("Gamma0",     5,  1000,  Scale.log),       # Lorentz factor at the core
+        ParamDef("theta_c",  0.0,   0.5,  Scale.linear),    # Core half-opening angle [rad]
+        ParamDef("theta_v",  0.0,   0.0,  Scale.fixed),     # Viewing angle [rad]
+        ParamDef("p",          2,     3,  Scale.linear),    # Shocked electron power law index
+        ParamDef("eps_e",   1e-2,   0.5,  Scale.log),       # Electron energy fraction
+        ParamDef("eps_B",   1e-4,   0.5,  Scale.log),       # Magnetic field energy fraction
+        ParamDef("A_star",  1e-3,     1,  Scale.log),       # Wind parameter
     ]
 
 .. _A_star:
@@ -142,7 +90,7 @@ For ISM medium models, you would use the density parameter instead:
 
 .. code-block:: python
 
-    ParamDef("n_ism",     0.1,  1e-3,    10,  Scale.LOG),       # ISM density [cm^-3]
+    ParamDef("n_ism",   1e-3,    10,  Scale.log),       # ISM density [cm^-3]
 
 For a comprehensive list of all available parameters, their physical meanings, typical ranges, and usage guidelines, see the :doc:`parameter_reference` page.
 
@@ -156,31 +104,35 @@ Fitter
    :undoc-members:
    :show-inheritance:
 
-The `Fitter` class provides a high-level interface for MCMC fitting of GRB afterglow models to observational data.
+The `Fitter` class provides a high-level interface for MCMC fitting of GRB afterglow models to observational data. All model configuration is passed as keyword arguments to the constructor. Data is added directly to the fitter via ``add_flux_density()``, ``add_spectrum()``, and ``add_flux()`` methods.
 
 Example:
 
 .. code-block:: python
 
-    from VegasAfterglow import Fitter
+    from VegasAfterglow import Fitter, ParamDef, Scale
 
-    # Create the fitter object
-    fitter = Fitter(data, cfg)
+    # Create the fitter with model configuration and add data
+    fitter = Fitter(z=1.58, lumi_dist=3.364e28, jet="tophat", medium="ism")
+    fitter.add_flux_density(nu=4.84e14, t=t_data, f_nu=flux_data, err=flux_err)
+    fitter.add_spectrum(t=3000, nu=nu_data, f_nu=spectrum_data, err=spectrum_err)
 
-    # Run the MCMC fitting
+    # Run MCMC with emcee
     result = fitter.fit(
-        param_defs=mc_params,          # Parameter definitions
-        resolution=(1, 5, 10),       # Grid resolution (phi, theta, time)
-        total_steps=10000,             # Total number of MCMC steps
-        burn_frac=0.3,                 # Fraction of steps to discard as burn-in
-        thin=1                         # Thinning factor
+        mc_params,
+        resolution=(0.1, 0.25, 10),      # Grid resolution (phi, theta, t)
+        sampler="emcee",               # MCMC sampler
+        nsteps=10000,                  # Number of steps per walker
+        nburn=1000,                    # Burn-in steps to discard
+        npool=8,                       # Number of parallel threads
+        top_k=10,                      # Number of best-fit parameters to return
     )
 
     # Generate light curves with best-fit parameters
-    lc_best = fitter.flux_density_grid(result.best_params, t_out, bands)
+    lc_best = fitter.flux_density_grid(result.top_k_params[0], t_out, bands)
 
     # Generate spectra with best-fit parameters
-    spec_best = fitter.flux_density_grid(result.best_params, times, nu_out)
+    spec_best = fitter.flux_density_grid(result.top_k_params[0], times, nu_out)
 
 .. _api-fitresult:
 
@@ -192,19 +144,7 @@ FitResult
    :undoc-members:
    :show-inheritance:
 
-The `FitResult` class stores the results of an MCMC fit, including the posterior samples, log probabilities, and best-fit parameters.
-
-.. _api-vegasmc:
-
-VegasMC
-^^^^^^^
-
-.. autoclass:: VegasAfterglow.VegasMC
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-The `VegasMC` class is the core calculator for MCMC sampling, providing efficient computation of model likelihood based on the specified parameters.
+The `FitResult` class stores the results of an MCMC fit, including the posterior samples, log probabilities, top-k best-fit parameters, and the full bilby Result object for diagnostics.
 
 Documenting Python Code
 -----------------------
@@ -255,20 +195,21 @@ Here's an example of a well-documented class:
         Single-parameter definition for MCMC.
 
         This class defines a parameter to be used in MCMC fitting, including
-        its name, initial value, prior range, and sampling scale.
+        its name, prior range, sampling scale, and optional initial value.
 
         Parameters
         ----------
         name : str
             The parameter name
-        init : float
-            Initial value for the parameter
-        lower : float, optional
-            Lower bound for the parameter (not needed for FIXED scale)
-        upper : float, optional
-            Upper bound for the parameter (not needed for FIXED scale)
+        lower : float
+            Lower bound for the parameter
+        upper : float
+            Upper bound for the parameter
         scale : Scale, optional
             Sampling scale (LINEAR, LOG, or FIXED), default is LINEAR
+        initial : float, optional
+            Initial value for the parameter (in linear space, auto-converted
+            for LOG scale). If not provided, defaults to midpoint of range.
 
         Notes
         -----

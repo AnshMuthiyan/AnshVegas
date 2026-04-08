@@ -3,6 +3,11 @@ Parameter Reference
 
 This page provides a comprehensive reference for all parameters used in VegasAfterglow, including their physical meanings, typical ranges, and units. All parameters listed here are available in the code and can be set via Python interfaces.
 
+.. image:: ../../assets/parameter-map.svg
+   :width: 100%
+   :alt: Parameter Reference Map
+   :align: center
+
 Physical Parameters
 -------------------
 
@@ -61,8 +66,8 @@ Jet Structure Parameters
      - radians
      - :math:`0.01 - 0.5`
      - Half-opening angle of the jet core
-   * - ``duration``
-     - :math:`T_{\rm dur}`
+   * - ``tau``
+     - :math:`\tau`
      - seconds
      - :math:`0.1 - 1000`
      - Duration of energy injection (affects reverse shock)
@@ -285,12 +290,12 @@ Physics Switches
    * - ``rvs_ssc``
      - false
      - Include reverse shock synchrotron self-Compton
-   * - ``ssc_cooling``
-     - false
-     - Include inverse Compton cooling
    * - ``kn``
      - false
      - Use Klein-Nishina cross-section for IC scattering
+   * - ``cmb_cooling``
+     - false
+     - Include inverse Compton cooling off the CMB. Can be enabled independently of ``ssc``; when both are active, the total Compton-Y includes both SSC and CMB contributions. Important at high redshifts where CMB energy density scales as :math:`(1+z)^4`
    * - ``magnetar``
      - false
      - Include magnetar energy injection
@@ -310,11 +315,11 @@ Grid Resolution
      - Units
      - Description
    * - ``phi_resol``
-     - 0.3
+     - 0.1
      - points/degree
      - Angular resolution in azimuthal direction
    * - ``theta_resol``
-     - 1.0
+     - 0.5
      - points/degree
      - Angular resolution in polar direction
    * - ``t_resol``
@@ -368,11 +373,11 @@ Parameter Scaling Types
 
    * - Scale Type
      - Description and Usage
-   * - ``Scale.LOG``
+   * - ``Scale.log``
      - Sample in log₁₀ space. Use for parameters spanning multiple orders of magnitude (energies, densities, microphysics parameters)
-   * - ``Scale.LINEAR``
+   * - ``Scale.linear``
      - Sample in linear space. Use for parameters with limited ranges (angles, power-law indices)
-   * - ``Scale.FIXED``
+   * - ``Scale.fixed``
      - Keep parameter fixed at initial value. Use when you don't want to vary a parameter
 
 Parameter Relationships and Constraints
@@ -456,4 +461,4 @@ Understanding parameter correlations helps in MCMC fitting:
 - **Jet break time**: Determines :math:`\theta_c`, :math:`E_{\rm iso}`
 - **Late times (> 100 days)**: Sensitive to :math:`n_{\rm ISM}`, :math:`p`
 
-For more detailed information on parameter estimation strategies and examples of using these parameters in practice, see the :doc:`examples` and :doc:`mcmc_fitting` pages.
+For more detailed information on parameter estimation strategies and examples of using these parameters in practice, see the :doc:`examples/index` and :doc:`mcmc_fitting/index` pages.

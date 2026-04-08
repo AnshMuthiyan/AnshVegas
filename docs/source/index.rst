@@ -33,9 +33,12 @@ Key Features
 
    installation
    quickstart
-   examples
-   mcmc_fitting
+   using_cli
+   examples/index
+   mcmc_fitting/index
+   redback_integration
    parameter_reference
+   validation
    python_api
    cpp_api
    troubleshooting

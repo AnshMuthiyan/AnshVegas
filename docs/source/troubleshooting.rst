@@ -21,7 +21,7 @@ A: This is usually caused by one of the following:
 
 A: Performance can be improved by:
 
-- **Reducing resolution**: Use ``resolutions=(0.1, 1, 10)`` for speed, ``(0.3, 5, 20)`` for accuracy
+- **Reducing resolution**: Use ``resolutions=(0.05, 0.2, 5)`` for speed, ``(0.1, 0.5, 20)`` for accuracy
 - **Limiting frequency/time ranges**: Calculate only the bands and times you need
 - **Using built-in profiles**: Built-in jet structures are faster than user-defined Python functions
 - **For MCMC**: Consider using fewer parameters or coarser resolution
@@ -51,8 +51,8 @@ A: Try the following:
 
 - **Check parameter ranges**: Ensure prior ranges include the true values
 - **Use better initial guesses**: Set ``ParamDef`` initial values closer to expected results
-- **Increase burn-in**: Use ``burn_frac=0.5`` or higher for difficult problems
-- **More walkers**: Use ``n_walkers > 2 * n_parameters`` (emcee recommendation)
+- **Increase live points**: Use ``nlive=1000`` or higher for difficult problems
+- **Lower dlogz**: Use ``dlogz=0.05`` for better convergence (at cost of runtime)
 - **Check data quality**: Ensure observational uncertainties are realistic
 - **Start with coarser resolution**: Use ``resolution=(0.5, 1.5, 7)`` for initial exploration
 
@@ -60,8 +60,8 @@ A: Try the following:
 
 A: Optimization strategies:
 
-- **Reduce resolution**: Use ``resolution=(0.3, 1, 10)`` for initial exploration
-- **Fewer parameters**: Fix some parameters with ``Scale.FIXED``
+- **Reduce resolution**: Use ``resolution=(0.1, 0.25, 10)`` for initial exploration
+- **Fewer parameters**: Fix some parameters with ``Scale.fixed``
 - **Coarser time/frequency grids**: Use fewer data points for initial fits
 - **Parallel processing**: Ensure you're using multiple cores
 - **Data screening**: Apply ``logscale_screen`` to reduce dataset size (see Data Selection section)
@@ -70,7 +70,7 @@ A: Optimization strategies:
 
 A: Check:
 
-- **Parameter scaling**: Use ``Scale.LOG`` for parameters spanning orders of magnitude
+- **Parameter scaling**: Use ``Scale.log`` for parameters spanning orders of magnitude
 - **Prior ranges**: Ensure they're physically motivated and not too restrictive
 - **Model degeneracies**: Some parameters may be strongly correlated
 - **Data coverage**: Limited frequency/time coverage can lead to poor constraints
@@ -81,7 +81,7 @@ A: Memory optimization:
 
 - **Reduce resolution**: Lower ``resolution`` parameters
 - **Decrease number of workers**: Use fewer ``num_workers``
-- **Use thinning**: Set ``thin > 1`` to save fewer samples
+- **Reduce live points**: Use smaller ``nlive`` value
 - **Monitor dataset size**: Check ``data.data_points_num()`` and use screening if >500 points
 
 **Q: MCMC fails or crashes**
@@ -107,7 +107,7 @@ A: This often indicates data selection problems:
   - Calculate points per band: some bands may dominate χ²
 
 **Solutions:**
-  - **Apply logscale_screen**: Use ``ObsData.logscale_screen(times, points_per_decade)`` for manual screening
+  - **Apply logscale_screen**: Use ``logscale_screen(times, data_density)`` for manual screening
   - **Balance frequency bands**: Target 10-30 points per band, avoid >100 points in any single band
   - **Use weights**: De-emphasize over-sampled regions with the ``weights`` parameter
   - **Consider systematic floors**: Add systematic uncertainty floors for highly precise data
@@ -118,17 +118,18 @@ A: This often indicates data selection problems:
     # Problem: 500 optical points, 20 X-ray points, 10 radio points
 
     # Solution: Manual reduction using logscale_screen
-    data = ObsData()
-    # Add all data normally, but use screening for over-sampled bands
-    optical_indices = ObsData.logscale_screen(optical_times, points_per_decade=4)
-    data.add_flux_density(nu=5e14,
-                         t=optical_times[optical_indices],  # ~40 points
-                         f_nu=optical_flux[optical_indices],
-                         err=optical_err[optical_indices])
+    from VegasAfterglow import logscale_screen
+
+    # Use screening for over-sampled bands
+    optical_indices = logscale_screen(optical_times, data_density=4)
+    fitter.add_flux_density(nu=5e14,
+                            t=optical_times[optical_indices],  # ~40 points
+                            f_nu=optical_flux[optical_indices],
+                            err=optical_err[optical_indices])
 
     # Add other bands normally
-    data.add_flux_density(nu=2e17, t=xray_times, f_nu=xray_flux, err=xray_err)
-    data.add_flux_density(nu=1e9, t=radio_times, f_nu=radio_flux, err=radio_err)
+    fitter.add_flux_density(nu=2e17, t=xray_times, f_nu=xray_flux, err=xray_err)
+    fitter.add_flux_density(nu=1e9, t=radio_times, f_nu=radio_flux, err=radio_err)
 
     # Alternative: Weight by band density to balance contributions
     optical_weight = 1.0 / len(optical_times)  # Down-weight dense band
@@ -144,7 +145,7 @@ A: This indicates temporal imbalance in your dataset:
   - Strong late-time constraints dominating the χ² calculation
 
 **Solutions:**
-  - **Apply temporal screening**: Use ``logscale_screen(times, points_per_decade)`` for manual control
+  - **Apply temporal screening**: Use ``logscale_screen(times, data_density)`` for manual control
   - **Ensure early-time representation**: Don't neglect the first few decades
   - **Weight epochs appropriately**: Use temporal weights to balance early vs. late constraints
   - **Check data quality**: Verify that late-time error bars are realistic
@@ -190,11 +191,17 @@ A: Common data loading issues:
 
 **Q: Error messages about missing dependencies**
 
-A: Install required packages:
+A: The core package only requires NumPy. For MCMC fitting:
 
 .. code-block:: bash
 
-    pip install numpy scipy matplotlib pandas corner emcee
+    pip install VegasAfterglow[mcmc]
+
+For plotting and MCMC visualization:
+
+.. code-block:: bash
+
+    pip install matplotlib corner tqdm
 
 For specific features:
 
@@ -241,27 +248,31 @@ The ``resolutions`` parameter in ``Model()`` controls computational accuracy vs 
      - Speed
      - Accuracy
    * - Initial exploration
-     - ``(0.2, 1, 5)``
+     - ``(0.1, 0.3, 5)``
      - Very Fast
      - Low
    * - Standard calculations
-     - ``(0.3, 1, 10)``
+     - ``(0.1, 0.25, 10)``
      - Fast
      - Good
    * - MCMC fitting
-     - ``(0.3, 2, 10)``
+     - ``(0.1, 0.25, 10)``
      - Moderate
      - Good
    * - Publication quality
-     - ``(0.3, 5, 20)``
+     - ``(0.3, 2, 20)``
      - Slow
      - Very High
 
 Where ``resolutions=(phi_ppd, theta_ppd, t_ppd)``:
 
-- ``phi_ppd``: Points per degree in azimuthal direction
-- ``theta_ppd``: Points per degree in polar direction. The code sets a minimum of 56 points across the jet profile.
-- ``t_ppd``: Points per decade in time direction. The code sets a minimum of 24 time points.
+- ``phi_ppd``: Azimuthal resolution in points per degree. The total number of phi grid points is ``360 × phi_ppd``, with a minimum of 1 total point.
+- ``theta_ppd``: Polar resolution in points per degree. The total number of theta grid points is ``(theta_max − theta_min) × theta_ppd``, with a minimum of 32 total points. Setting a lower resolution cannot reduce the grid below this minimum.
+- ``t_ppd``: Temporal resolution in points per decade. The total number of time grid points is ``log10(t_max / t_min) × t_ppd``, with a minimum of 24 total points. Setting a lower resolution cannot reduce the grid below this minimum.
+
+.. note::
+
+   The grid is **not uniform**. The code uses an internal adaptive algorithm that concentrates grid points where the solution varies most rapidly (e.g., near the jet edge and deceleration time). The resolution parameters control the *total* number of points, while the adaptive algorithm decides how to distribute them. The floor values (32 for theta, 24 for time) ensure the grid never becomes too coarse, even at low resolution settings.
 
 Memory Usage
 ^^^^^^^^^^^^
@@ -278,7 +289,7 @@ Getting Help
 
 If you encounter issues not covered here:
 
-1. **Check the examples**: The :doc:`examples` page covers many common use cases
+1. **Check the examples**: The :doc:`examples/index` page covers many common use cases
 2. **Search existing issues**: Visit our `GitHub Issues <https://github.com/YihanWangAstro/VegasAfterglow/issues>`_
 3. **Create a new issue**: Include:
 

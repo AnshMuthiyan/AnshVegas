@@ -7,31 +7,15 @@
 
 #include "synchrotron.h"
 
-#include <cmath>
-
-#include "afterglow.h"
+#include "../core/physics.h"
+#include "../util/macros.h"
+#include "../util/utilities.h"
 #include "inverse-compton.h"
-#include "macros.h"
-#include "physics.h"
-#include "utilities.h"
 
-Real SynElectrons::compute_N_gamma(Real gamma) const {
-    if (gamma <= gamma_c) { // Below cooling Lorentz factor: direct scaling
-        return N_e * compute_spectrum(gamma);
-    } else {
-        return fast_exp2((gamma_c - gamma) / gamma_M) * N_e * compute_spectrum(gamma) * (1 + Y_c) /
-               (1 + InverseComptonY::compute_Y_tilt_at_gamma(Ys, gamma, p));
-    }
-}
+//========================================================================================================
+//                                  Helper Functions - Simple Utilities
+//========================================================================================================
 
-Real SynElectrons::compute_column_den(Real gamma) const {
-    if (gamma <= gamma_c) { // Below cooling Lorentz factor: direct scaling
-        return column_den * compute_spectrum(gamma);
-    } else {
-        return fast_exp2((gamma_c - gamma) / gamma_M) * column_den * compute_spectrum(gamma) * (1 + Y_c) /
-               (1 + InverseComptonY::compute_Y_tilt_at_gamma(Ys, gamma, p));
-    }
-}
 /**
  * <!-- ************************************************************************************** -->
  * @internal
@@ -75,376 +59,9 @@ size_t determine_regime(Real a, Real c, Real m) {
         return 0;
 }
 
-Real SynElectrons::compute_spectrum(Real gamma) const {
-    switch (regime) {
-        case 1: // same as case 2
-        case 2:
-            if (gamma <= gamma_m) {
-                return 0; // Below minimum Lorentz factor, spectrum is zero
-            } else if (gamma <= gamma_c) {
-                return (p - 1) * fast_pow(gamma / gamma_m, -p) /
-                       gamma_m; // Power-law spectrum between gamma_m and gamma_c
-            } else
-                return (p - 1) * fast_pow(gamma / gamma_m, -p) * gamma_c / (gamma * gamma_m);
-            // Above cooling Lorentz factor: exponential cutoff applied
-
-            break;
-        case 3:
-            if (gamma <= gamma_c) {
-                return 0; // Below cooling Lorentz factor, spectrum is zero
-            } else if (gamma <= gamma_m) {
-                return gamma_c / (gamma * gamma); // Intermediate regime scaling
-            } else
-                return gamma_c / (gamma * gamma_m) * fast_pow(gamma / gamma_m, -p);
-            // Above minimum Lorentz factor: power-law with exponential cutoff
-
-            break;
-
-#ifdef SELF_ABSORPTION_HEATING
-        case 4: // Gao, Lei, Wu and Zhang 2013 Eq 18
-            if (gamma <= gamma_a) {
-                return 3 * gamma * gamma / (gamma_a * gamma_a * gamma_a); // thermal part
-            } else if (gamma <= gamma_m) {
-                return gamma_c / (gamma * gamma); // Transition region
-            } else
-                return gamma_c / (gamma * gamma_m) * fast_pow(gamma / gamma_m, -p);
-            // High energy tail with exponential cutoff
-
-            break;
-        case 5: // Gao, Lei, Wu and Zhang 2013 Eq 19
-            if (gamma <= gamma_a) {
-                return 3 * gamma * gamma / (gamma_a * gamma_a * gamma_a); // thermal part
-            } else
-                return (p - 1) * gamma_c / (gamma * gamma_m) * fast_pow(gamma / gamma_m, -p);
-
-            break;
-        case 6: // Gao, Lei, Wu and Zhang 2013 Eq 20
-            if (gamma <= gamma_a) {
-                return 3 * gamma * gamma / (gamma_a * gamma_a * gamma_a); // thermal part
-            } else
-                return fast_pow(gamma_m, p - 1) * gamma_c * fast_pow(gamma, -(p + 1));
-
-            break;
-#else
-        case 4:
-            if (gamma <= gamma_c) {
-                return 0; // Below cooling Lorentz factor, spectrum is zero
-            } else if (gamma <= gamma_m) {
-                return gamma_c / (gamma * gamma); // Intermediate regime scaling
-            } else
-                return gamma_c / (gamma * gamma_m) * fast_pow(gamma / gamma_m, -p);
-            // High energy tail with exponential cutoff
-
-            break;
-        case 5:
-            if (gamma <= gamma_m) {
-                return 0; // Below minimum Lorentz factor, spectrum is zero
-            } else if (gamma <= gamma_c) {
-                return (p - 1) * fast_pow(gamma / gamma_m, -p) /
-                       gamma_m; // Power-law spectrum between gamma_m and gamma_c
-            } else
-                return (p - 1) * fast_pow(gamma / gamma_m, -p) * gamma_c / (gamma * gamma_m);
-            break;
-        case 6:
-            if (gamma <= gamma_c) {
-                return 0; // Below cooling Lorentz factor, spectrum is zero
-            } else if (gamma <= gamma_m) {
-                return gamma_c / (gamma * gamma); // Intermediate regime scaling
-            } else
-                return gamma_c / (gamma * gamma_m) * fast_pow(gamma / gamma_m, -p);
-
-            break;
-#endif
-        default:
-            return 0;
-    }
-}
-
-Real SynPhotons::compute_I_nu(Real nu) const {
-    if (nu <= nu_c) { // Below cooling frequency, simple scaling
-        return I_nu_max * compute_spectrum(nu);
-    } else {
-        return fast_exp2((nu_c - nu) / nu_M) * I_nu_max * compute_spectrum(nu) * (1 + Y_c) /
-               (1 + InverseComptonY::compute_Y_tilt_at_nu(Ys, nu, p));
-    }
-}
-
-Real SynPhotons::compute_log2_I_nu(Real log2_nu) const {
-    if (log2_nu <= log2_nu_c) { // Below cooling frequency, simple scaling
-        return log2_I_nu_max + compute_log2_spectrum(log2_nu);
-    } else {
-        Real cooling_factor = (1 + Y_c) / (1 + InverseComptonY::compute_Y_tilt_at_nu(Ys, std::exp2(log2_nu), p));
-        return log2_I_nu_max + compute_log2_spectrum(log2_nu) + fast_log2(cooling_factor) +
-               (nu_c - fast_exp2(log2_nu)) / nu_M;
-    }
-}
-
-void SynPhotons::update_constant() {
-    // Update constants based on spectral parameters
-    if (regime == 1) {
-        // a_m_1_3 = std::cbrt(nu_a / nu_m);  // (nu_a / nu_m)^(1/3)
-        // c_m_mpa1_2 = fastPow(nu_c / nu_m, (-p + 1) / 2);  // (nu_c / nu_m)^((-p+1)/2)
-        C1_ = std::cbrt(nu_a / nu_m);
-        C2_ = fast_pow(nu_c / nu_m, (-p + 1) / 2);
-
-        log2_C1_ = (log2_nu_a - log2_nu_m) / 3 - 2 * log2_nu_a;
-        log2_C2_ = -log2_nu_m / 3;
-        log2_C3_ = (p - 1) / 2 * log2_nu_m;
-        log2_C4_ = (p - 1) / 2 * (log2_nu_m - log2_nu_c) + p / 2 * log2_nu_c;
-    } else if (regime == 2) {
-        // m_a_pa4_2 = fastPow(nu_m / nu_a, (p + 4) / 2);    // (nu_m / nu_a)^((p+4)/2)
-        // a_m_mpa1_2 = fastPow(nu_a / nu_m, (-p + 1) / 2);  // (nu_a / nu_m)^((-p+1)/2)
-        // c_m_mpa1_2 = fastPow(nu_c / nu_m, (-p + 1) / 2);  // (nu_c / nu_m)^((-p+1)/2)
-        C1_ = fast_pow(nu_m / nu_a, (p + 4) / 2);
-        C2_ = fast_pow(nu_a / nu_m, (-p + 1) / 2);
-        C3_ = fast_pow(nu_c / nu_m, (-p + 1) / 2);
-
-        log2_C1_ = (p + 4) / 2 * (log2_nu_m - log2_nu_a) - 2 * log2_nu_m;
-        log2_C2_ = (p - 1) / 2 * (log2_nu_m - log2_nu_a) - 2.5 * log2_nu_a;
-        log2_C3_ = (p - 1) / 2 * log2_nu_m;
-        log2_C4_ = (p - 1) / 2 * (log2_nu_m - log2_nu_c) + p / 2 * log2_nu_c;
-    } else if (regime == 3) {
-        // a_c_1_3 = std::cbrt(nu_a / nu_c);  // (nu_a / nu_c)^(1/3)
-        // c_m_1_2 = std::sqrt(nu_c / nu_m);  // (nu_c / nu_m)^(1/2)
-        C1_ = std::cbrt(nu_a / nu_c);
-        C2_ = std::sqrt(nu_c / nu_m);
-
-        log2_C1_ = (log2_nu_a - log2_nu_c) / 3 - 2 * log2_nu_a;
-        log2_C2_ = -log2_nu_c / 3;
-        log2_C3_ = log2_nu_c / 2;
-        log2_C4_ = (log2_nu_c - log2_nu_m) / 2 + p / 2 * log2_nu_m;
-    } else if (regime == 4) {
-        C1_ = std::sqrt(nu_a / nu_m);
-        C3_ = 3;
-        C2_ = std::sqrt(nu_c / nu_a) / C3_;
-
-        log2_C4_ = fast_log2(C2_);
-
-        log2_C1_ = -2 * log2_nu_a;
-        log2_C2_ = log2_C4_ + log2_nu_a / 2;
-        log2_C3_ = log2_C4_ + (log2_nu_a - log2_nu_m) / 2 + p / 2 * log2_nu_m;
-
-    } else if (regime == 5) {
-        C1_ = std::sqrt(nu_m / nu_a);
-        C3_ = 3 / (p - 1);
-        C2_ = std::sqrt(nu_c / nu_a) * fast_pow(nu_m / nu_a, (p - 1) / 2) / C3_;
-
-        log2_C4_ = fast_log2(C2_);
-
-        log2_C1_ = -2.5 * log2_nu_a;
-        log2_C2_ = log2_C4_ + p / 2 * log2_nu_a;
-
-        log2_C3_ = fast_log2(C3_);
-    } else if (regime == 6) {
-        C1_ = std::sqrt(nu_m / nu_a);
-        C3_ = 3;
-        C2_ = std::sqrt(nu_c / nu_a) * fast_pow(nu_m / nu_a, (p - 1) / 2) / C3_;
-
-        log2_C4_ = fast_log2(C2_);
-
-        log2_C1_ = -2.5 * log2_nu_a;
-        log2_C2_ = log2_C4_ + p / 2 * log2_nu_a;
-
-        log2_C3_ = 1.5849625007; // log2(3)
-    }
-}
-
-Real SynPhotons::compute_spectrum(Real nu) const {
-    switch (regime) {
-        case 1:
-            if (nu <= nu_a) {
-                return C1_ * (nu / nu_a) * (nu / nu_a);
-            }
-            if (nu <= nu_m) {
-                return std::cbrt(nu / nu_m);
-            }
-            if (nu <= nu_c) {
-                return fast_pow(nu / nu_m, -(p - 1) / 2);
-            }
-
-            return C2_ * fast_pow(nu / nu_c, -p / 2);
-
-            break;
-        case 2:
-            if (nu <= nu_m) {
-                return C1_ * (nu / nu_m) * (nu / nu_m);
-            }
-            if (nu <= nu_a) {
-                return C2_ * pow52(nu / nu_a); // Using pow52 for (nu / nu_a)^(5/2)
-            }
-            if (nu <= nu_c) {
-                return fast_pow(nu / nu_m, -(p - 1) / 2);
-            }
-
-            return C3_ * fast_pow(nu / nu_c, -p / 2);
-
-            break;
-        case 3:
-            if (nu <= nu_a) {
-                return C1_ * (nu / nu_a) * (nu / nu_a);
-            }
-            if (nu <= nu_c) {
-                return std::cbrt(nu / nu_c);
-            }
-            if (nu <= nu_m) {
-                return std::sqrt(nu_c / nu);
-            }
-            return C2_ * fast_pow(nu / nu_m, -p / 2);
-
-            break;
-#ifdef SELF_ABSORPTION_HEATING
-        case 4:
-            if (nu <= nu_a) {
-                return (nu / nu_a) * (nu / nu_a);
-            }
-            if (nu <= nu_m) {
-                return C2_ * std::sqrt(nu_a / nu);
-            }
-            return C2_ * C1_ * fast_pow(nu / nu_m, -p / 2);
-
-            break;
-        case 5:
-        case 6:
-            if (nu < nu_m) {
-                return C1_ * (nu / nu_a) * (nu / nu_a);
-            }
-            if (nu <= nu_a) {
-                return pow52(nu / nu_a);
-            }
-            return C2_ * fast_pow(nu / nu_a, -p / 2);
-
-            break;
-
-#else
-        case 4:
-            if (nu <= nu_a) {
-                return 3 * C2_ * (nu / nu_a) * (nu / nu_a);
-            }
-            if (nu <= nu_m) {
-                return 3 * C2_ * std::sqrt(nu_a / nu);
-            }
-            return 3 * C2_ * C1_ * fast_pow(nu / nu_m, -p / 2);
-
-            break;
-        case 5:
-        case 6:
-            if (nu <= nu_m) {
-                return C3_ * C2_ * C1_ * (nu / nu_a) * (nu / nu_a);
-            }
-            if (nu <= nu_a) {
-                return C3_ * C2_ * pow52(nu / nu_a);
-            }
-            return C3_ * C2_ * fast_pow(nu / nu_a, -p / 2);
-
-            break;
-
-#endif
-        default:
-            return 0;
-            break;
-    }
-}
-
-Real SynPhotons::compute_log2_spectrum(Real log2_nu) const {
-    constexpr Real log2_3 = 1.5849625007; // log2(3)
-    switch (regime) {
-        case 1:
-            if (log2_nu <= log2_nu_a) {
-                return log2_C1_ + 2. * log2_nu;
-            }
-            if (log2_nu <= log2_nu_m) {
-                return log2_C2_ + log2_nu / 3.;
-            }
-            if (log2_nu <= log2_nu_c) {
-                return log2_C3_ - (p - 1.) / 2. * log2_nu;
-            }
-            return log2_C4_ - p / 2. * log2_nu;
-
-            break;
-        case 2:
-            if (log2_nu <= log2_nu_m) {
-                return log2_C1_ + 2. * log2_nu;
-            }
-            if (log2_nu <= log2_nu_a) {
-                return log2_C2_ + 2.5 * log2_nu;
-            }
-            if (log2_nu <= log2_nu_c) {
-                return log2_C3_ - (p - 1.) / 2. * log2_nu;
-            }
-
-            return log2_C4_ - p / 2. * log2_nu;
-
-            break;
-        case 3:
-            if (log2_nu <= log2_nu_a) {
-                return log2_C1_ + 2. * log2_nu;
-            }
-            if (log2_nu <= log2_nu_c) {
-                return log2_C2_ + log2_nu / 3.;
-            }
-            if (log2_nu <= log2_nu_m) {
-                return log2_C3_ - log2_nu / 2.;
-            }
-
-            return log2_C4_ - p / 2. * log2_nu;
-
-            break;
-#ifdef SELF_ABSORPTION_HEATING
-        case 4:
-            if (log2_nu <= log2_nu_a) {
-                return log2_C1_ + 2. * log2_nu;
-            }
-            if (log2_nu <= log2_nu_m) {
-                return log2_C2_ - log2_nu / 2.;
-            }
-
-            return log2_C3_ - p / 2. * log2_nu;
-
-            break;
-        case 5:
-        case 6:
-            if (log2_nu <= log2_nu_m) {
-                return 0.5 * log2_nu_m + log2_C1_ + 2. * log2_nu;
-            }
-
-            if (log2_nu <= log2_nu_a) {
-                return log2_C1_ + 2.5 * log2_nu;
-            }
-
-            return log2_C2_ - p / 2. * log2_nu;
-
-            break;
-#else
-        case 4:
-
-            if (log2_nu <= log2_nu_a) {
-                return log2_3 + log2_C4_ + log2_C1_ + 2. * log2_nu;
-            }
-            if (log2_nu <= log2_nu_m) {
-                return log2_3 + log2_C2_ - log2_nu / 2.;
-            }
-
-            return log2_3 + log2_C3_ - p / 2. * log2_nu;
-
-            break;
-        case 5:
-        case 6:
-            if (log2_nu <= log2_nu_m) {
-                return log2_C3_ + log2_C4_ + 0.5 * log2_nu_m + log2_C1_ + 2. * log2_nu;
-            }
-            if (log2_nu <= log2_nu_a) {
-                return log2_C3_ + log2_C4_ + log2_C1_ + 2.5 * log2_nu;
-            }
-
-            return log2_C3_ + log2_C2_ - p / 2. * log2_nu;
-
-            break;
-#endif
-        default:
-            return -con::inf;
-            break;
-    }
-}
+//========================================================================================================
+//                                  Helper Functions - Foundation Physics
+//========================================================================================================
 
 /**
  * <!-- ************************************************************************************** -->
@@ -456,10 +73,10 @@ Real SynPhotons::compute_log2_spectrum(Real log2_nu) const {
  * @return Peak synchrotron power per electron
  * <!-- ************************************************************************************** -->
  */
-Real compute_single_elec_P_nu_max(Real B, Real p) {
+Real compute_single_elec_P_nu_max(Real B, Real /*p*/) {
     constexpr Real sin_angle_ave = con::pi / 4;
     constexpr Real Fx_max = 0.92; // Bing's book 5.5
-    return B * (sin_angle_ave * Fx_max * 1.73205080757 * con::e3 / (con::me * con::c2));
+    return B * (sin_angle_ave * Fx_max * std::numbers::sqrt3 * con::e3 / (con::me * con::c2));
 }
 
 /**
@@ -506,9 +123,12 @@ Real compute_syn_freq(Real gamma, Real B) {
  * <!-- ************************************************************************************** -->
  */
 Real compute_syn_gamma(Real nu, Real B) {
-    Real gamma = std::sqrt((4 * con::pi * con::me * con::c / (3 * con::e)) * (nu / B));
-    return gamma;
+    return std::sqrt((4 * con::pi * con::me * con::c / (3 * con::e)) * (nu / B));
 }
+
+//========================================================================================================
+//                                  Helper Functions - Gamma Computations
+//========================================================================================================
 
 /**
  * <!-- ************************************************************************************** -->
@@ -521,21 +141,11 @@ Real compute_syn_gamma(Real nu, Real B) {
  * @return Maximum electron Lorentz factor
  * <!-- ************************************************************************************** -->
  */
-Real compute_syn_gamma_M(Real B, InverseComptonY const& Ys, Real p) {
+Real compute_syn_gamma_M(Real B, Real Y, Real /*p*/) {
     if (B == 0) {
         return std::numeric_limits<Real>::infinity();
     }
-    Real Y0 = InverseComptonY::compute_Y_Thompson(Ys);
-    Real gamma_M = std::sqrt(6 * con::pi * con::e / con::sigmaT / (B * (1 + Y0)));
-    Real Y1 = InverseComptonY::compute_Y_tilt_at_gamma(Ys, gamma_M, p);
-
-    for (; std::fabs((Y1 - Y0) / Y0) > 1e-3;) {
-        gamma_M = std::sqrt(6 * con::pi * con::e / con::sigmaT / (B * (1 + Y1)));
-        Y0 = Y1;
-        Y1 = InverseComptonY::compute_Y_tilt_at_gamma(Ys, gamma_M, p);
-    }
-
-    return gamma_M;
+    return std::sqrt(6 * con::pi * con::e / con::sigmaT / (B * (1 + Y)));
 }
 
 /**
@@ -553,7 +163,7 @@ Real compute_syn_gamma_M(Real B, InverseComptonY const& Ys, Real p) {
  * <!-- ************************************************************************************** -->
  */
 Real compute_syn_gamma_m(Real Gamma_th, Real gamma_M, Real eps_e, Real p, Real xi) {
-    Real gamma_ave_minus_1 = eps_e * (Gamma_th - 1) * (con::mp / con::me) / xi;
+    const Real gamma_ave_minus_1 = eps_e * (Gamma_th - 1) * (con::mp / con::me) / xi;
     Real gamma_m_minus_1 = 1;
     if (p > 2) {
         gamma_m_minus_1 = (p - 2) / (p - 1) * gamma_ave_minus_1;
@@ -569,23 +179,20 @@ Real compute_syn_gamma_m(Real Gamma_th, Real gamma_M, Real eps_e, Real p, Real x
     return gamma_m_minus_1 + 1;
 }
 
-Real compute_gamma_c(Real t_comv, Real B, InverseComptonY const& Ys, Real p) {
-    Real ad_cooling = 1;
-    //-sqrt(Gamma * Gamma - 1) * con::c* t_comv / r;  // adiabatic cooling
+Real compute_gamma_c(Real t_comv, Real B, Real Y) {
+    constexpr Real ad_cooling = 1; // adiabatic cooling disabled (factor=1)
 
-    Real Y0 = InverseComptonY::compute_Y_Thompson(Ys);
-    Real gamma_bar = (6 * con::pi * con::me * con::c / con::sigmaT) / (B * B * (1 + Y0) * t_comv) * ad_cooling;
-    Real gamma_c = (gamma_bar + std::sqrt(gamma_bar * gamma_bar + 4)) / 2; // correction on newtonian regime
-
-    Real Y1 = InverseComptonY::compute_Y_tilt_at_gamma(Ys, gamma_c, p);
-    for (; std::fabs((Y1 - Y0) / Y0) > 1e-3;) { // iterate for IC cooling
-        gamma_bar = (6 * con::pi * con::me * con::c / con::sigmaT) / (B * B * (1 + Y1) * t_comv) * ad_cooling;
-        gamma_c = (gamma_bar + std::sqrt(gamma_bar * gamma_bar + 4)) / 2;
-        Y0 = Y1;
-        Y1 = InverseComptonY::compute_Y_tilt_at_gamma(Ys, gamma_c, p);
-    }
+    const Real gamma_bar = (6 * con::pi * con::me * con::c / con::sigmaT) / (B * B * (1 + Y) * t_comv) * ad_cooling;
+    const Real gamma_c = (gamma_bar + std::sqrt(gamma_bar * gamma_bar + 4)) / 2; // correction on newtonian regime
 
     return gamma_c;
+}
+
+Real cool_after_crossing(Real gamma_x, Real gamma_m_x, Real gamma_m, Real /*dt_comv*/, Real /*B*/, Real /*Y*/) {
+    //Real gamma_c_dt = compute_gamma_c(dt_comv, B, Y);
+    Real gamma_syn = gamma_x; //* gamma_c_dt / (gamma_x + gamma_c_dt);
+    Real f_ad = (gamma_m - 1) / (gamma_m_x - 1);
+    return (gamma_syn - 1) * f_ad + 1;
 }
 
 /**
@@ -603,72 +210,41 @@ Real compute_gamma_c(Real t_comv, Real B, InverseComptonY const& Ys, Real p) {
  * @return Self-absorption Lorentz factor
  * <!-- ************************************************************************************** -->
  */
-Real compute_syn_gamma_a(Real B, Real I_syn_peak, Real gamma_m, Real gamma_c, Real gamma_M, Real p) {
-    Real gamma_peak = std::min(gamma_m, gamma_c);
-    Real nu_peak = compute_syn_freq(gamma_peak, B);
+Real compute_syn_gamma_a(Real B, Real I_syn_peak, Real gamma_m, Real gamma_c, Real /*gamma_M*/, Real p) {
+    const Real gamma_peak = std::min(gamma_m, gamma_c);
+    const Real nu_peak = compute_syn_freq(gamma_peak, B);
 
-    Real kT = (gamma_peak - 1) * (con::me * con::c2) / 3;
+    const Real kT = (gamma_peak - 1) * (con::me * con::c2) / 3;
     // 2kT(nu_a/c)^2 = I_peak*(nu_a/nu_peak)^(1/3) // first assume nu_a is in the 1/3 segment
     Real nu_a = fast_pow(I_syn_peak * con::c2 / (std::cbrt(nu_peak) * 2 * kT), 0.6);
 
-#ifdef SELF_ABSORPTION_HEATING
-    if (nu_a > nu_peak) { // nu_a is not in the 1/3 segment
-        constexpr Real coef = 3 * con::e / (4 * con::pi * con::me * con::c);
-        if (gamma_c > gamma_m) { // first assume nu_a is in the -(p-1)/2 segment, 2kT(nu_a/nu_m)^2.5 nu_m^2/c^2
-            Real nu_m = compute_syn_freq(gamma_m, B);
-            nu_a = fast_pow(I_syn_peak * con::c2 / (2 * kT) * fast_pow(nu_m, p / 2), 2 / (p + 4));
-            Real nu_c = compute_syn_freq(gamma_c, B);
-            if (nu_a > nu_c) { // nu_a is not in the -(p-1)/2 segment, strong absorption
-                Real C = 1.5 * I_syn_peak / (con::me * pow52(coef * B) * std::sqrt(nu_m));
-                Real gamma_a =
-                    root_bisect([C](Real x) -> Real { return x * x * x * x * x * x - x - C; }, gamma_c, gamma_M);
-                return gamma_a;
-            }
-        } else { // strong absorption
-            Real nu_m = compute_syn_freq(gamma_m, B);
-            Real C = 1.5 * I_syn_peak / (con::me * pow52(coef * B) * std::sqrt(nu_m));
-            Real gamma_a = root_bisect([C](Real x) -> Real { return x * x * x * x * x * x - x - C; }, gamma_c, gamma_M);
-            return gamma_a;
-        }
-    }
-#else
     if (nu_a > nu_peak) {        // nu_a is not in the 1/3 segment
         if (gamma_c > gamma_m) { // first assume nu_a is in the -(p-1)/2 segment
-            Real nu_m = compute_syn_freq(gamma_m, B);
+            const Real nu_m = compute_syn_freq(gamma_m, B);
             nu_a = fast_pow(I_syn_peak * con::c2 / (2 * kT) * fast_pow(nu_m, p / 2), 2 / (p + 4));
-            Real nu_c = compute_syn_freq(gamma_c, B);
+            const Real nu_c = compute_syn_freq(gamma_c, B);
             if (nu_a > nu_c) { //  nu_a is not in the -(p-1)/2 but -p/2 segment
                 nu_a = fast_pow(I_syn_peak * con::c2 / (2 * kT) * std::sqrt(nu_c) * fast_pow(nu_m, p / 2), 2 / (p + 5));
             }
         } else { //first assume nu_a is in the -1/2 segment
-            Real nu_c = compute_syn_freq(gamma_c, B);
+            const Real nu_c = compute_syn_freq(gamma_c, B);
             nu_a = fast_pow(I_syn_peak * con::c2 / (2 * kT) * std::sqrt(nu_c), 0.4);
-            Real nu_m = compute_syn_freq(gamma_m, B);
+            const Real nu_m = compute_syn_freq(gamma_m, B);
             if (nu_a > nu_m) { // nu_a is not in the -1/2 segment but -p/2 segment
                 nu_a = fast_pow(I_syn_peak * con::c2 / (2 * kT) * std::sqrt(nu_c) * fast_pow(nu_m, p / 2), 2 / (p + 5));
             }
         }
     }
-
-#endif
     return compute_syn_gamma(nu_a, B) + 1;
 }
 
 Real compute_gamma_peak(Real gamma_a, Real gamma_m, Real gamma_c) {
-    Real gamma_peak = std::min(gamma_m, gamma_c);
+    const Real gamma_peak = std::min(gamma_m, gamma_c);
     if (gamma_a > gamma_c) {
         return gamma_a;
     } else {
         return gamma_peak;
     }
-}
-
-Real cyclotron_correction(Real gamma_m, Real p) {
-    Real f = (gamma_m - 1) / gamma_m;
-    if (p > 3) {
-        f = fast_pow(f, (p - 1) / 2);
-    }
-    return f;
 }
 
 /**
@@ -683,114 +259,160 @@ Real compute_gamma_peak(SynElectrons const& e) {
     return compute_gamma_peak(e.gamma_a, e.gamma_m, e.gamma_c);
 }
 
-void update_electrons_4Y(SynElectronGrid& electrons, Shock const& shock) {
-    auto [phi_size, theta_size, t_size] = shock.shape();
+Real cyclotron_correction(Real gamma_m, Real p) {
+    Real f = (gamma_m - 1) / gamma_m;
+    if (p > 3) {
+        f = fast_pow(f, (p - 1) / 2);
+    }
+    return f;
+}
 
-    for (size_t i = 0; i < phi_size; ++i) {
-        for (size_t j = 0; j < theta_size; ++j) {
-            size_t k_inj = shock.injection_idx(i, j);
-            for (size_t k = 0; k < t_size; ++k) {
-                if (shock.required(i, j, k) == 0) {
-                    continue;
-                }
-                Real t_com = shock.t_comv(i, j, k);
-                Real B = shock.B(i, j, k);
-                Real r = shock.r(i, j, k);
-                Real p = electrons(i, j, k).p;
-                // Real Gamma = shock.Gamma(i, j, k);
-                auto& Ys = electrons(i, j, k).Ys;
-                auto& elec = electrons(i, j, k);
+//========================================================================================================
+//                                  SynElectrons Class Methods
+//========================================================================================================
 
-                elec.gamma_M = compute_syn_gamma_M(B, Ys, p);
-                elec.gamma_c = compute_gamma_c(t_com, B, Ys, p);
+Real SynElectrons::compute_spectrum(Real gamma) const noexcept {
+    // Smooth broken power law with sharpness s=1
+    // General s: fast_pow(1 + fast_pow(gamma/gamma_break, s*delta), -1/s)
+    // With s=1:  1 / (1 + fast_pow(gamma/gamma_break, delta))
 
-                if (k >= k_inj) { // no new shocked electrons, cooling lorentz factor is truncation lorentz factor
-                    elec.gamma_c = electrons(i, j, k_inj).gamma_c * elec.gamma_m / electrons(i, j, k_inj).gamma_m;
-                    elec.gamma_M = elec.gamma_c;
-                }
-                Real I_nu_peak = compute_syn_I_peak(B, p, elec.column_den);
-                elec.gamma_a = compute_syn_gamma_a(B, I_nu_peak, elec.gamma_m, elec.gamma_c, elec.gamma_M, p);
-                elec.regime = determine_regime(elec.gamma_a, elec.gamma_c, elec.gamma_m);
-                elec.Y_c = InverseComptonY::compute_Y_tilt_at_gamma(Ys, elec.gamma_c, p);
-            }
-        }
+    switch (regime) {
+        case 1: // slow cooling: gamma_m < gamma_c
+        case 2:
+        case 5:
+            // (p-1)/gamma_m * (gamma/gamma_m)^-p * gamma_c/(gamma + gamma_c) * exp cutoffs
+            return (p - 1) / gamma_m * fast_exp(-gamma / gamma_M - gamma_m / gamma) * fast_pow(gamma / gamma_m, -p) *
+                   gamma_c / (gamma + gamma_c);
+
+        case 3: // fast cooling: gamma_c < gamma_m
+        case 4:
+        case 6:
+            // gamma_c/gamma^2 / (1 + (gamma/gamma_m)^(p-1)) * exp cutoffs
+            return fast_exp(-gamma / gamma_M - gamma_c / gamma) * gamma_c / (gamma * gamma) /
+                   (1.0 + fast_pow(gamma / gamma_m, p - 1));
+
+        default:
+            return 0;
     }
 }
 
-SynElectronGrid generate_syn_electrons(Shock const& shock) {
+Real SynElectrons::compute_N_gamma(Real gamma) const noexcept {
+    if (gamma <= gamma_c) { // Below the cooling Lorentz factor: direct scaling
+        return N_e * compute_spectrum(gamma);
+    } else {
+        return N_e * compute_spectrum(gamma) * (1 + Y_c) / (1 + Ys.gamma_spectrum(gamma));
+    }
+}
+
+Real SynElectrons::compute_column_den(Real gamma) const noexcept {
+    if (gamma <= gamma_c) { // Below the cooling Lorentz factor: direct scaling
+        return column_den * compute_spectrum(gamma);
+    } else {
+        return column_den * compute_spectrum(gamma) * (1 + Y_c) / (1 + Ys.gamma_spectrum(gamma));
+    }
+}
+
+//========================================================================================================
+//                                  Factory Functions - Synchrotron Electrons
+//========================================================================================================
+
+SynElectronGrid generate_syn_electrons(Shock const& shock, Coord const& coord) {
     auto [phi_size, theta_size, t_size] = shock.shape();
 
     SynElectronGrid electrons({phi_size, theta_size, t_size});
 
-    generate_syn_electrons(electrons, shock);
+    generate_syn_electrons(electrons, shock, coord);
 
     return electrons;
 }
 
-void generate_syn_electrons(SynElectronGrid& electrons, Shock const& shock) {
+void generate_syn_electrons(SynElectronGrid& electrons, Shock const& shock, Coord const& coord) {
     auto [phi_size, theta_size, t_size] = shock.shape();
 
-    RadParams rad = shock.rad;
+    const RadParams rad = shock.rad;
 
     electrons.resize({phi_size, theta_size, t_size});
 
-    for (size_t i = 0; i < phi_size; ++i) {
-        for (size_t j = 0; j < theta_size; ++j) {
-            size_t k_inj = shock.injection_idx(i, j);
+    const size_t phi_compute = (coord.symmetry != Symmetry::structured) ? 1 : phi_size;
+
+    for (size_t i = 0; i < phi_compute; ++i) {
+        for (size_t j : coord.theta_reps) {
+            const size_t k_inj = shock.injection_idx(i, j);
             for (size_t k = 0; k < t_size; ++k) {
-                if (shock.required(i, j, k) == 0) {
-                    continue;
-                }
-                Real t_com = shock.t_comv(i, j, k);
-                Real B = shock.B(i, j, k);
-                Real r = shock.r(i, j, k);
+                const Real t_com = shock.t_comv(i, j, k);
+                const Real B = shock.B(i, j, k);
+                const Real r = shock.r(i, j, k);
                 // Real Gamma = shock.Gamma(i, j, k);
-                Real Gamma_th = shock.Gamma_th(i, j, k);
+                const Real Gamma_th = shock.Gamma_th(i, j, k);
 
                 auto& elec = electrons(i, j, k);
 
-                elec.gamma_M = compute_syn_gamma_M(B, elec.Ys, rad.p);
+                elec.gamma_M = compute_syn_gamma_M(B, 0., rad.p);
                 elec.gamma_m = compute_syn_gamma_m(Gamma_th, elec.gamma_M, rad.eps_e, rad.p, rad.xi_e);
 
                 // Fraction of synchrotron electrons; the rest are cyclotron
-                Real f_syn = cyclotron_correction(elec.gamma_m, rad.p);
+                const Real f_syn = cyclotron_correction(elec.gamma_m, rad.p);
 
                 elec.N_e = shock.N_p(i, j, k) * rad.xi_e * f_syn;
                 elec.column_den = elec.N_e / (r * r);
-                Real I_nu_peak = compute_syn_I_peak(B, rad.p, elec.column_den);
+                const Real I_nu_peak = compute_syn_I_peak(B, rad.p, elec.column_den);
 
-                elec.gamma_c = compute_gamma_c(t_com, B, electrons(i, j, k).Ys, rad.p);
+                // no new shocked electrons, cool the relic population from crossing
+                if (k >= k_inj) {
+                    auto const& inj = electrons(i, j, k_inj - 1);
+                    const Real dt_comv = t_com - shock.t_comv(i, j, k_inj - 1);
+                    elec.gamma_c = cool_after_crossing(inj.gamma_c, inj.gamma_m, elec.gamma_m, t_com, B, 0);
 
-                if (k >= k_inj) { // no new shocked electrons, cooling lorentz factor is truncation lorentz factor
-                    elec.gamma_c = electrons(i, j, k_inj).gamma_c * elec.gamma_m / electrons(i, j, k_inj).gamma_m;
-                    elec.gamma_M = elec.gamma_c;
+                    elec.gamma_M = cool_after_crossing(inj.gamma_M, inj.gamma_m, elec.gamma_m, dt_comv, B, 0);
+                } else {
+                    elec.gamma_c = compute_gamma_c(t_com, B, 0.);
                 }
 
                 elec.gamma_a = compute_syn_gamma_a(B, I_nu_peak, elec.gamma_m, elec.gamma_c, elec.gamma_M, rad.p);
                 elec.regime = determine_regime(elec.gamma_a, elec.gamma_c, elec.gamma_m);
-
                 elec.p = rad.p;
             }
         }
     }
+
+    broadcast_symmetry(electrons, coord);
 }
 
-SynPhotonGrid generate_syn_photons(Shock const& shock, SynElectronGrid const& electrons) {
+//========================================================================================================
+//                                  Factory Functions - Synchrotron Photons
+//========================================================================================================
+
+SynPhotonGrid generate_syn_photons(Shock const& shock, SynElectronGrid const& electrons, Coord const& coord) {
     auto [phi_size, theta_size, t_size] = shock.shape();
 
     SynPhotonGrid photons({phi_size, theta_size, t_size});
 
-    generate_syn_photons(photons, shock, electrons);
+    generate_syn_photons(photons, shock, electrons, coord);
 
     return photons;
 }
 
-void generate_syn_photons(SynPhotonGrid& photons, Shock const& shock, SynElectronGrid const& electrons) {
+SynPhotonGrid generate_syn_photons(Shock const& shock, SynElectronGrid const& electrons, Coord const& coord,
+                                   MediumVariant const& medium) {
+    auto [phi_size, theta_size, t_size] = shock.shape();
+
+    SynPhotonGrid photons({phi_size, theta_size, t_size});
+
+    generate_syn_photons(photons, shock, electrons, coord, medium);
+
+    return photons;
+}
+
+void generate_syn_photons(SynPhotonGrid& photons, Shock const& shock, SynElectronGrid const& electrons,
+                          Coord const& coord) {
     auto [phi_size, theta_size, t_size] = shock.shape();
 
     photons.resize({phi_size, theta_size, t_size});
-    for (size_t i = 0; i < phi_size; ++i) {
-        for (size_t j = 0; j < theta_size; ++j) {
+
+    const size_t phi_compute = (coord.symmetry != Symmetry::structured) ? 1 : phi_size;
+
+    for (size_t i = 0; i < phi_compute; ++i) {
+        for (size_t j : coord.theta_reps) {
             for (size_t k = 0; k < t_size; ++k) {
                 auto& ph = photons(i, j, k);
                 auto& elec = electrons(i, j, k);
@@ -799,11 +421,7 @@ void generate_syn_photons(SynPhotonGrid& photons, Shock const& shock, SynElectro
                 ph.Y_c = elec.Y_c;
                 ph.regime = elec.regime;
 
-                if (shock.required(i, j, k) == 0) {
-                    continue;
-                }
-
-                Real B = shock.B(i, j, k);
+                const Real B = shock.B(i, j, k);
 
                 ph.nu_M = compute_syn_freq(elec.gamma_M, B);
                 ph.nu_m = compute_syn_freq(elec.gamma_m, B);
@@ -811,13 +429,48 @@ void generate_syn_photons(SynPhotonGrid& photons, Shock const& shock, SynElectro
                 ph.nu_a = compute_syn_freq(elec.gamma_a, B);
                 ph.I_nu_max = compute_syn_I_peak(B, elec.p, elec.column_den);
 
-                ph.log2_I_nu_max = fast_log2(ph.I_nu_max);
-                ph.log2_nu_m = fast_log2(ph.nu_m);
-                ph.log2_nu_c = fast_log2(ph.nu_c);
-                ph.log2_nu_a = fast_log2(ph.nu_a);
-                ph.log2_nu_M = fast_log2(ph.nu_M);
-                ph.update_constant();
+                ph.build();
             }
         }
     }
+
+    broadcast_symmetry(photons, coord);
+}
+
+void generate_syn_photons(SynPhotonGrid& photons, Shock const& shock, SynElectronGrid const& electrons,
+                          Coord const& coord, MediumVariant const& medium) {
+    auto [phi_size, theta_size, t_size] = shock.shape();
+
+    photons.resize({phi_size, theta_size, t_size});
+
+    const size_t phi_compute = (coord.symmetry != Symmetry::structured) ? 1 : phi_size;
+
+    for (size_t i = 0; i < phi_compute; ++i) {
+        const Real phi = coord.phi(i);
+        for (size_t j : coord.theta_reps) {
+            for (size_t k = 0; k < t_size; ++k) {
+                auto& ph = photons(i, j, k);
+                auto& elec = electrons(i, j, k);
+                ph.p = elec.p;
+                ph.Ys = elec.Ys;
+                ph.Y_c = elec.Y_c;
+                ph.regime = elec.regime;
+
+                const Real B = shock.B(i, j, k);
+                const Real theta = shock.theta(i, j, k);
+                const Real r = shock.r(i, j, k);
+
+                ph.k_eff = medium_local_k(medium, phi, theta, r);
+                ph.nu_M = compute_syn_freq(elec.gamma_M, B);
+                ph.nu_m = compute_syn_freq(elec.gamma_m, B);
+                ph.nu_c = compute_syn_freq(elec.gamma_c, B);
+                ph.nu_a = compute_syn_freq(elec.gamma_a, B);
+                ph.I_nu_max = compute_syn_I_peak(B, elec.p, elec.column_den);
+
+                ph.build();
+            }
+        }
+    }
+
+    broadcast_symmetry(photons, coord);
 }

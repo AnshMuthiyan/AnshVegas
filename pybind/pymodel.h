@@ -7,13 +7,17 @@
 
 #pragma once
 
-#include <iostream>
+#include <cstdio>
+#include <functional>
 #include <optional>
+#include <string>
+#include <utility>
 #include <vector>
 
-#include "afterglow.h"
-#include "macros.h"
 #include "pybind.h"
+#include "shock_dispatch.h"
+#include "util/macros.h"
+#include "util/profiler.h"
 
 /**
  * <!-- ************************************************************************************** -->
@@ -42,6 +46,12 @@ struct PyMagnetar {
     Real L0; ///< Characteristic luminosity [erg/s]
     Real t0; ///< Spin-down time scale [s]
     Real q;  ///< Power-law index for spin-down
+
+    [[nodiscard]] std::string repr() const {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "Magnetar(L0=%.6g, t0=%.6g, q=%.6g)", L0, t0, q);
+        return buf;
+    }
 };
 
 /**
@@ -61,8 +71,8 @@ struct PyMagnetar {
  * @return Ejecta Configured ejecta object representing the top-hat jet structure
  * <!-- ************************************************************************************** -->
  */
-Ejecta PyTophatJet(Real theta_c, Real E_iso, Real Gamma0, bool spreading = false, Real duration = 1,
-                   std::optional<PyMagnetar> magnetar = std::nullopt);
+JetVariant PyTophatJet(Real theta_c, Real E_iso, Real Gamma0, bool spreading = false, Real duration = 1,
+                       std::optional<PyMagnetar> const& magnetar = std::nullopt);
 
 /**
  * <!-- ************************************************************************************** -->
@@ -81,8 +91,8 @@ Ejecta PyTophatJet(Real theta_c, Real E_iso, Real Gamma0, bool spreading = false
  * @return Ejecta Configured ejecta object representing the Gaussian jet structure
  * <!-- ************************************************************************************** -->
  */
-Ejecta PyGaussianJet(Real theta_c, Real E_iso, Real Gamma0, bool spreading = false, Real duration = 1,
-                     std::optional<PyMagnetar> magnetar = std::nullopt);
+JetVariant PyGaussianJet(Real theta_c, Real E_iso, Real Gamma0, bool spreading = false, Real duration = 1,
+                         std::optional<PyMagnetar> const& magnetar = std::nullopt);
 
 /**
  * <!-- ************************************************************************************** -->
@@ -124,8 +134,8 @@ Ejecta PyPowerLawJet(Real theta_c, Real E_iso, Real Gamma0, Real k_e, Real k_g, 
  * @return Ejecta Configured ejecta object representing the power-law wing jet structure
  * <!-- ************************************************************************************** -->
  */
-Ejecta PyPowerLawWing(Real theta_c, Real E_iso_w, Real Gamma0_w, Real k_e, Real k_g, bool spreading = false,
-                      Real duration = 1);
+JetVariant PyPowerLawWing(Real theta_c, Real E_iso_w, Real Gamma0_w, Real k_e, Real k_g, bool spreading = false,
+                          Real duration = 1);
 /**
  * <!-- ************************************************************************************** -->
  * @brief Creates a step power-law jet model: a pencil beam core and powerlaw wing with jump at theta_c.
@@ -146,8 +156,8 @@ Ejecta PyPowerLawWing(Real theta_c, Real E_iso_w, Real Gamma0_w, Real k_e, Real 
  * @return Ejecta Configured jet with step power-law profile
  * <!-- ************************************************************************************** -->
  */
-Ejecta PyStepPowerLawJet(Real theta_c, Real E_iso, Real Gamma0, Real E_iso_w, Real Gamma0_w, Real k_e, Real k_g,
-                         bool spreading, Real duration, std::optional<PyMagnetar> magnetar);
+JetVariant PyStepPowerLawJet(Real theta_c, Real E_iso, Real Gamma0, Real E_iso_w, Real Gamma0_w, Real k_e, Real k_g,
+                             bool spreading, Real duration, std::optional<PyMagnetar> const& magnetar);
 
 /**
  * <!-- ************************************************************************************** -->
@@ -168,8 +178,9 @@ Ejecta PyStepPowerLawJet(Real theta_c, Real E_iso, Real Gamma0, Real E_iso_w, Re
  * @return Ejecta Configured two-component jet with specified properties
  * <!-- ************************************************************************************** -->
  */
-Ejecta PyTwoComponentJet(Real theta_c, Real E_iso, Real Gamma0, Real theta_w, Real E_iso_w, Real Gamma0_w,
-                         bool spreading = false, Real duration = 1, std::optional<PyMagnetar> magnetar = std::nullopt);
+JetVariant PyTwoComponentJet(Real theta_c, Real E_iso, Real Gamma0, Real theta_w, Real E_iso_w, Real Gamma0_w,
+                             bool spreading = false, Real duration = 1,
+                             std::optional<PyMagnetar> const& magnetar = std::nullopt);
 
 /**
  * <!-- ************************************************************************************** -->
@@ -182,7 +193,7 @@ Ejecta PyTwoComponentJet(Real theta_c, Real E_iso, Real Gamma0, Real theta_w, Re
  * @return Medium Configured medium with constant ISM density properties
  * <!-- ************************************************************************************** -->
  */
-Medium PyISM(Real n_ism);
+ISM PyISM(Real n_ism);
 
 /**
  * <!-- ************************************************************************************** -->
@@ -237,6 +248,20 @@ class PyObserver {
     Real z{0};            ///< Redshift
     Real theta_obs{0};    ///< Viewing angle [radians]
     Real phi_obs{0};      ///< Azimuthal angle [radians]
+
+    [[nodiscard]] Real lumi_dist_cgs() const { return lumi_dist / unit::cm; }
+
+    [[nodiscard]] std::string repr() const {
+        char buf[256];
+        if (phi_obs != 0) {
+            snprintf(buf, sizeof(buf), "Observer(lumi_dist=%.6g, z=%.6g, theta_obs=%.6g, phi_obs=%.6g)",
+                     lumi_dist / unit::cm, z, theta_obs, phi_obs);
+        } else {
+            snprintf(buf, sizeof(buf), "Observer(lumi_dist=%.6g, z=%.6g, theta_obs=%.6g)", lumi_dist / unit::cm, z,
+                     theta_obs);
+        }
+        return buf;
+    }
 };
 
 /**
@@ -262,19 +287,38 @@ class PyRadiation {
      * @param eps_B Fraction of shock energy stored in magnetic field
      * @param p Electron energy spectral index (typically 2.2-2.8)
      * @param xi_e Fraction of shock-heated electrons that are accelerated to relativistic energies
-     * @param ssc_cooling Whether to include inverse Compton cooling of electrons
-     * @param ssc Whether to include synchrotron self-Compton emission (default: false)
+     * @param ssc Whether to include synchrotron self-Compton emission and IC cooling (default: false)
      * @param kn Whether to include Klein-Nishina corrections for IC processes (default: false)
      * <!-- ************************************************************************************** -->
      */
-    PyRadiation(Real eps_e, Real eps_B, Real p, Real xi_e = 1, bool ssc_cooling = false, bool ssc = false,
-                bool kn = false)
-        : rad(RadParams{eps_e, eps_B, p, xi_e}), ssc_cooling(ssc_cooling), ssc(ssc), kn(kn) {}
+    PyRadiation(Real eps_e, Real eps_B, Real p, Real xi_e = 1, bool ssc = false, bool kn = false,
+                bool cmb_cooling = false)
+        : rad(RadParams{eps_e, eps_B, p, xi_e, cmb_cooling}), ssc(ssc), kn(kn) {}
 
     RadParams rad;
-    bool ssc_cooling{false}; ///< Whether to include IC cooling
-    bool ssc{false};         ///< Whether to include SSC
-    bool kn{false};          ///< Whether to include KN
+    bool ssc{false}; ///< Whether to include SSC emission and IC cooling
+    bool kn{false};  ///< Whether to include KN
+
+    [[nodiscard]] std::string repr() const {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "Radiation(eps_e=%.6g, eps_B=%.6g, p=%.6g", rad.eps_e, rad.eps_B, rad.p);
+        std::string s = buf;
+        if (rad.xi_e != 1) {
+            snprintf(buf, sizeof(buf), ", xi_e=%.6g", rad.xi_e);
+            s += buf;
+        }
+        if (ssc) {
+            s += ", ssc=True";
+        }
+        if (kn) {
+            s += ", kn=True";
+        }
+        if (rad.cmb_cooling) {
+            s += ", cmb_cooling=True";
+        }
+        s += ")";
+        return s;
+    }
 };
 
 /**
@@ -288,7 +332,8 @@ class PyRadiation {
  * @param medium Medium object representing circumburst environment density profile
  * <!-- ************************************************************************************** -->
  */
-void convert_unit(Ejecta& jet, Medium& medium);
+void convert_unit_jet(JetVariant& jet);
+void convert_unit_medium(MediumVariant& medium);
 
 using XTArray = xt::xarray<Real>;
 
@@ -304,6 +349,25 @@ using XTArray = xt::xarray<Real>;
 struct Flux {
     XTArray sync; ///< Synchrotron emission flux [mJy]
     XTArray ssc;  ///< Synchrotron self-Compton flux [mJy]
+
+    [[nodiscard]] std::string repr() const {
+        std::string s = "Flux(sync";
+        if (ssc.dimension() > 0) {
+            s += " + ssc";
+        }
+        if (sync.dimension() > 0) {
+            s += ", shape=(";
+            for (size_t i = 0; i < sync.dimension(); ++i) {
+                if (i > 0) {
+                    s += ", ";
+                }
+                s += std::to_string(sync.shape()[i]);
+            }
+            s += ")";
+        }
+        s += ")";
+        return s;
+    }
 };
 
 /**
@@ -322,6 +386,83 @@ struct PyFlux {
 
     ///< Calculate total flux by summing all components
     void calc_total();
+
+    [[nodiscard]] std::string repr() const {
+        if (total.size() == 0) {
+            return "FluxDict(empty)";
+        }
+        std::string s = "FluxDict(shape=(";
+        for (size_t i = 0; i < total.dimension(); ++i) {
+            if (i > 0) {
+                s += ", ";
+            }
+            s += std::to_string(total.shape()[i]);
+        }
+        s += "), components=[fwd.sync";
+        if (fwd.ssc.dimension() > 0) {
+            s += ", fwd.ssc";
+        }
+        if (rvs.sync.dimension() > 0) {
+            s += ", rvs.sync";
+        }
+        if (rvs.ssc.dimension() > 0) {
+            s += ", rvs.ssc";
+        }
+        s += "])";
+        return s;
+    }
+};
+
+/**
+ * @struct PySkyImage
+ * @brief Resolved sky image sequence of the afterglow at given observer times and frequency.
+ */
+struct PySkyImage {
+    XTArray image;              ///< [n_frames, npixel, npixel] surface brightness (erg/cm²/s/Hz/sr)
+    std::array<Real, 4> extent; ///< {x_min, x_max, y_min, y_max} angular extent (rad), shared by all frames
+    Real pixel_solid_angle{0};  ///< Pixel solid angle (sr), shared by all frames
+
+    [[nodiscard]] std::string repr() const {
+        if (image.size() == 0) {
+            return "SkyImage(empty)";
+        }
+        char buf[256];
+        snprintf(buf, sizeof(buf),
+                 "SkyImage(n_frames=%zu, npixel=%zu, extent=(%.3e, %.3e, %.3e, %.3e) rad, pixel_solid_angle=%.3e sr)",
+                 image.shape()[0], image.shape()[1], extent[0], extent[1], extent[2], extent[3], pixel_solid_angle);
+        return buf;
+    }
+};
+
+// Type aliases for IC photon grid
+using SynICPhoton = ICPhoton<SynElectrons, SynPhotons>;
+using SynICPhotonGrid = xt::xtensor<SynICPhoton, 3>;
+
+/// Callable evaluator for per-cell spectrum queries (takes comoving frequency in Hz)
+struct SpectrumEvaluator {
+    std::function<Real(Real)> eval_;
+    XTArray operator()(PyArray const& nu_comv) const;
+};
+
+/// Callable evaluator for per-cell Y(gamma) queries
+struct YEvaluator {
+    std::function<Real(Real)> eval_;
+    XTArray operator()(PyArray const& gamma) const;
+};
+
+/// Grid accessor for synchrotron spectrum: sync_spectrum[i,j,k] → SpectrumEvaluator
+struct SynSpectrumGrid {
+    SynPhotonGrid const* grid_;
+};
+
+/// Grid accessor for IC spectrum: ssc_spectrum[i,j,k] → SpectrumEvaluator
+struct ICSpectrumGrid {
+    SynICPhotonGrid* grid_; // non-const: ICPhoton::compute_I_nu lazily generates spectrum
+};
+
+/// Grid accessor for Y(gamma): Y_spectrum[i,j,k] → YEvaluator
+struct YSpectrumGrid {
+    SynPhotonGrid const* grid_;
 };
 
 /**
@@ -348,12 +489,38 @@ struct PyShock {
     XTArray gamma_c;  ///< Cooling electron Lorentz factor
     XTArray gamma_M;  ///< Maximum electron Lorentz factor
     XTArray gamma_a;  ///< Absorption electron Lorentz factor
-    XTArray nu_m;     ///< Synchrotron frequency for γ_m [Hz]
-    XTArray nu_c;     ///< Synchrotron frequency for γ_c [Hz]
-    XTArray nu_M;     ///< Synchrotron frequency for γ_M [Hz]
-    XTArray nu_a;     ///< Synchrotron frequency for γ_a [Hz]
+    XTArray gamma_m_hat;
+    XTArray gamma_c_hat;
+    XTArray nu_m; ///< Synchrotron frequency for γ_m [Hz]
+    XTArray nu_c; ///< Synchrotron frequency for γ_c [Hz]
+    XTArray nu_M; ///< Synchrotron frequency for γ_M [Hz]
+    XTArray nu_a; ///< Synchrotron frequency for γ_a [Hz]
+    XTArray nu_m_hat;
+    XTArray nu_c_hat;
+    XTArray Y_T;
     XTArray I_nu_max; ///< Maximum specific intensity [erg/s/Hz]
     XTArray Doppler;  ///< Doppler factor for beaming
+
+    // Stored photon grids for per-cell spectrum evaluation
+    SynPhotonGrid syn_photons_;
+    SynICPhotonGrid ic_photons_;
+    bool has_syn_spectrum_{false};
+    bool has_ssc_spectrum_{false};
+
+    [[nodiscard]] std::string repr() const {
+        if (Gamma.size() == 0) {
+            return "ShockDetails(empty)";
+        }
+        std::string s = "ShockDetails(shape=(";
+        for (size_t i = 0; i < Gamma.dimension(); ++i) {
+            if (i > 0) {
+                s += ", ";
+            }
+            s += std::to_string(Gamma.shape()[i]);
+        }
+        s += "))";
+        return s;
+    }
 };
 
 /**
@@ -372,6 +539,13 @@ struct PyDetails {
 
     PyShock fwd; ///< Forward shock evolution details
     PyShock rvs; ///< Reverse shock evolution details
+
+    [[nodiscard]] std::string repr() const {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "SimulationDetails(phi=%zu, theta=%zu, t_src=%zu)", phi.size(), theta.size(),
+                 t_src.size());
+        return buf;
+    }
 };
 
 /**
@@ -399,17 +573,19 @@ class PyModel {
      * @param observer Observer configuration including distance, redshift, and viewing angles
      * @param fwd_rad Radiation parameters for forward shock microphysics
      * @param rvs_rad Optional radiation parameters for reverse shock (default: none)
-     * @param resolutions Grid resolution tuple (phi_res, theta_res, time_res) in (deg⁻¹, deg⁻¹, decade⁻¹)
+     * @param resolutions Grid resolution tuple (phi_res, theta_res, time_res) in (deg⁻¹, deg⁻¹, decade⁻¹).
+     *        The total grid points in each dimension are computed from these resolutions, but
+     *        each has a minimum that cannot be reduced further: phi (min 1), theta (min 48), time (min 24).
      * @param rtol Relative tolerance for numerical integration (default: 1×10⁻⁵)
      * @param axisymmetric Whether to assume axisymmetric jet structure (default: true)
      * <!-- ************************************************************************************** -->
      */
-    PyModel(Ejecta jet, Medium medium, PyObserver observer, PyRadiation fwd_rad,
-            std::optional<PyRadiation> rvs_rad = std::nullopt,
-            std::tuple<Real, Real, Real> resolutions = std::make_tuple(0.3, 1, 10), Real rtol = 1e-5,
+    PyModel(JetVariant jet, MediumVariant medium, PyObserver const& observer, PyRadiation const& fwd_rad,
+            std::optional<PyRadiation> const& rvs_rad = std::nullopt,
+            std::tuple<Real, Real, Real> const& resolutions = std::make_tuple(0.1, 0.25, 10), Real rtol = 1e-5,
             bool axisymmetric = true)
-        : jet_(jet),
-          medium_(medium),
+        : jet_(std::move(jet)),
+          medium_(std::move(medium)),
           obs_setup(observer),
           fwd_rad(fwd_rad),
           rvs_rad_opt(rvs_rad),
@@ -418,7 +594,8 @@ class PyModel {
           t_resol(std::get<2>(resolutions)),
           rtol(rtol),
           axisymmetric(axisymmetric) {
-        convert_unit(this->jet_, this->medium_);
+        convert_unit_jet(this->jet_);
+        convert_unit_medium(this->medium_);
     }
 
     /**
@@ -481,6 +658,16 @@ class PyModel {
                                   size_t num_points = 10);
 
     /**
+     * @brief Compute resolved sky images at multiple observer times and a single frequency.
+     * @param t_obs Array of observer times [seconds]
+     * @param nu_obs Observer frequency [Hz]
+     * @param fov Total field of view [radians] (pixel scale = fov / npixel)
+     * @param npixel Number of pixels per side (default 64)
+     * @return PySkyImage with (n_frames, npixel, npixel) surface brightness (erg/cm²/s/Hz/sr), shared extent and pixel_solid_angle
+     */
+    PySkyImage sky_image(PyArray const& t_obs, double nu_obs, double fov, size_t npixel = 128);
+
+    /**
      * <!-- ************************************************************************************** -->
      * @brief Get comprehensive details of the shock evolution and model configuration.
      * @details Provides detailed information about the shock dynamics, particle distributions,
@@ -492,13 +679,47 @@ class PyModel {
      * @return PyDetails Structure with comprehensive shock evolution details
      * <!-- ************************************************************************************** -->
      */
-    PyDetails details(Real t_min, Real t_max);
+    [[nodiscard]] PyDetails details(Real t_min, Real t_max) const;
 
-    Array medium(Real phi, Real theta, Array const& r);
+    [[nodiscard]] Array medium(Real phi, Real theta, Array const& r) const;
 
-    Array jet_E_iso(Real phi, Array const& theta);
+    [[nodiscard]] Array jet_E_iso(Real phi, Array const& theta) const;
 
-    Array jet_Gamma0(Real phi, Array const& theta);
+    [[nodiscard]] Array jet_Gamma0(Real phi, Array const& theta) const;
+
+#ifdef AFTERGLOW_PROFILE
+    static auto profile_data() -> std::unordered_map<std::string, double> { return AFTERGLOW_PROFILE_RESULTS(); }
+    static auto profile_counters() -> std::unordered_map<std::string, size_t> { return AFTERGLOW_PROFILE_COUNTERS(); }
+    static void profile_reset() { AFTERGLOW_PROFILE_RESET(); }
+#endif
+
+    // Read-only accessors for Python properties
+    [[nodiscard]] PyObserver const& get_observer() const { return obs_setup; }
+    [[nodiscard]] PyRadiation const& get_fwd_rad() const { return fwd_rad; }
+    [[nodiscard]] std::optional<PyRadiation> const& get_rvs_rad() const { return rvs_rad_opt; }
+    [[nodiscard]] std::tuple<Real, Real, Real> get_resolutions() const { return {phi_resol, theta_resol, t_resol}; }
+    [[nodiscard]] Real get_rtol() const { return rtol; }
+    [[nodiscard]] bool get_axisymmetric() const { return axisymmetric; }
+
+    [[nodiscard]] std::string repr() const {
+        char buf[256];
+        const Real d = obs_setup.lumi_dist / unit::cm;
+        snprintf(buf, sizeof(buf),
+                 "Model(observer=Observer(lumi_dist=%.6g, z=%.6g, theta_obs=%.6g),\n"
+                 "      fwd_rad=Radiation(eps_e=%.6g, eps_B=%.6g, p=%.6g%s%s)",
+                 d, obs_setup.z, obs_setup.theta_obs, fwd_rad.rad.eps_e, fwd_rad.rad.eps_B, fwd_rad.rad.p,
+                 fwd_rad.ssc ? ", ssc=True" : "", fwd_rad.kn ? ", kn=True" : "");
+        std::string s = buf;
+        if (rvs_rad_opt) {
+            snprintf(buf, sizeof(buf), ",\n      rvs_rad=Radiation(eps_e=%.6g, eps_B=%.6g, p=%.6g)",
+                     rvs_rad_opt->rad.eps_e, rvs_rad_opt->rad.eps_B, rvs_rad_opt->rad.p);
+            s += buf;
+        }
+        snprintf(buf, sizeof(buf), ",\n      resolutions=(%.6g, %.6g, %.6g), rtol=%.6g)", phi_resol, theta_resol,
+                 t_resol, rtol);
+        s += buf;
+        return s;
+    }
 
   private:
     /**
@@ -507,14 +728,14 @@ class PyModel {
      * @details Template method that handles the core emission calculation logic using internal
      *          dimensionless units. This method sets up the coordinate system, generates
      *          shocks, and delegates to the appropriate emission calculation function.
-     * @param t Observer time array [internal units]
-     * @param nu Observer frequency array [internal units]
+     * @param t_obs Observer time array [internal units]
+     * @param nu_obs Observer frequency array [internal units]
      * @param flux_func Function to compute flux (either specific_flux or specific_flux_series)
      * @return PyFlux Structure with flux components
      * <!-- ************************************************************************************** -->
      */
     template <typename Func>
-    PyFlux compute_emission(Array const& t, Array const& nu, Func&& flux_func);
+    PyFlux compute_emission(Array const& t_obs, Array const& nu_obs, Func&& flux_func);
 
     /**
      * <!-- ************************************************************************************** -->
@@ -525,8 +746,8 @@ class PyModel {
      *          for a complete shock region.
      * @param shock Forward or reverse shock structure
      * @param coord Coordinate system for the simulation
-     * @param t Observer time array [internal units]
-     * @param nu Observer frequency array [internal units]
+     * @param t_obs Observer time array [internal units]
+     * @param nu_obs Observer frequency array [internal units]
      * @param obs Observer object for flux calculation
      * @param rad Radiation parameters controlling microphysics
      * @param emission Output flux structure to populate
@@ -534,8 +755,8 @@ class PyModel {
      * <!-- ************************************************************************************** -->
      */
     template <typename Func>
-    void single_shock_emission(Shock const& shock, Coord const& coord, Array const& t, Array const& nu, Observer& obs,
-                               PyRadiation rad, Flux& emission, Func&& flux_func);
+    void single_shock_emission(Shock const& shock, Coord const& coord, Array const& t_obs, Array const& nu_obs,
+                               Observer& obs, PyRadiation rad, Flux& emission, Func&& flux_func);
 
     /**
      * <!-- ************************************************************************************** -->
@@ -546,14 +767,13 @@ class PyModel {
      *          processes driving the afterglow emission.
      * @param shock Forward or reverse shock structure
      * @param coord Coordinate system for the simulation
-     * @param t Observer time array [internal units]
      * @param obs Observer object for coordinate transformations
      * @param rad Radiation parameters for particle calculations
      * @param details Output structure to populate with shock evolution data
      * <!-- ************************************************************************************** -->
      */
-    void single_evo_details(Shock const& shock, Coord const& coord, Array const& t, Observer& obs, PyRadiation rad,
-                            PyShock& details);
+    void single_evo_details(Shock const& shock, Coord const& coord, Observer& obs, PyRadiation const& rad,
+                            PyShock& details) const;
 
     /**
      * <!-- ************************************************************************************** -->
@@ -569,8 +789,8 @@ class PyModel {
         std::vector<size_t> idx_sorted;
     };
 
-    ExposureSampling generate_exposure_sampling(PyArray const& t, PyArray const& nu, PyArray const& expo_time,
-                                                size_t num_points);
+    static ExposureSampling generate_exposure_sampling(PyArray const& t, PyArray const& nu, PyArray const& expo_time,
+                                                       size_t num_points);
 
     /**
      * <!-- ************************************************************************************** -->
@@ -580,17 +800,17 @@ class PyModel {
      *          be observed with finite exposure times.
      * <!-- ************************************************************************************** -->
      */
-    void average_exposure_flux(PyFlux& result, std::vector<size_t> const& idx_sorted, size_t original_size,
-                               size_t num_points);
+    static void average_exposure_flux(PyFlux& result, std::vector<size_t> const& idx_sorted, size_t original_size,
+                                      size_t num_points);
 
-    Ejecta jet_;                            ///< Jet model
-    Medium medium_;                         ///< Circumburst medium
+    JetVariant jet_;                        ///< Jet model (TophatJet, GaussianJet, PowerLawJet, or Ejecta)
+    MediumVariant medium_;                  ///< Circumburst medium (ISM, Wind, or generic Medium)
     PyObserver obs_setup;                   ///< Observer configuration
     PyRadiation fwd_rad;                    ///< Forward shock radiation parameters
     std::optional<PyRadiation> rvs_rad_opt; ///< Optional reverse shock radiation parameters
     Real theta_w{con::pi / 2};              ///< Maximum polar angle to calculate
-    Real phi_resol{0.3};                    ///< Azimuthal resolution: number of points per degree
-    Real theta_resol{1};                    ///< Polar resolution: number of points per degree
+    Real phi_resol{0.1};                    ///< Azimuthal resolution: number of points per degree
+    Real theta_resol{0.5};                  ///< Polar resolution: number of points per degree
     Real t_resol{10};                       ///< Time resolution: number of points per decade
     Real rtol{1e-5};                        ///< Relative tolerance
     bool axisymmetric{true};                ///< Whether to assume axisymmetric jet
@@ -603,54 +823,75 @@ class PyModel {
 template <typename Func>
 void PyModel::single_shock_emission(Shock const& shock, Coord const& coord, Array const& t_obs, Array const& nu_obs,
                                     Observer& obs, PyRadiation rad, Flux& emission, Func&& flux_func) {
-    obs.observe(coord, shock, obs_setup.lumi_dist, obs_setup.z);
-
-    auto syn_e = generate_syn_electrons(shock);
-
-    auto syn_ph = generate_syn_photons(shock, syn_e);
-
-    if (rad.ssc_cooling) {
-        if (rad.kn) {
-            KN_cooling(syn_e, syn_ph, shock);
-        } else {
-            Thomson_cooling(syn_e, syn_ph, shock);
-        }
+    {
+        AFTERGLOW_PROFILE_SCOPE(EAT_grid);
+        obs.observe(coord, shock, obs_setup.lumi_dist, obs_setup.z);
     }
 
-    emission.sync = std::invoke(flux_func, obs, t_obs, nu_obs, syn_ph);
+    auto syn_e = [&] {
+        AFTERGLOW_PROFILE_SCOPE(syn_electrons);
+        return generate_syn_electrons(shock, coord);
+    }();
+
+    auto syn_ph = [&] {
+        AFTERGLOW_PROFILE_SCOPE(syn_photons);
+        return generate_syn_photons(shock, syn_e, coord, medium_);
+    }();
 
     if (rad.ssc) {
-        auto IC_ph = generate_IC_photons(syn_e, syn_ph, rad.kn);
-        emission.ssc = std::invoke(flux_func, obs, t_obs, nu_obs, IC_ph);
+        AFTERGLOW_PROFILE_SCOPE(cooling);
+        if (rad.kn) {
+            KN_cooling(syn_e, syn_ph, shock, coord, medium_, obs_setup.z);
+        } else {
+            Thomson_cooling(syn_e, syn_ph, shock, coord, medium_, obs_setup.z);
+        }
+    } else if (rad.rad.cmb_cooling) {
+        AFTERGLOW_PROFILE_SCOPE(cooling);
+        CMB_cooling(syn_e, syn_ph, shock, coord, medium_, obs_setup.z);
+    }
+
+    {
+        AFTERGLOW_PROFILE_SCOPE(sync_flux);
+        emission.sync = std::invoke(flux_func, obs, t_obs, nu_obs, syn_ph);
+    }
+
+    if (rad.ssc) {
+        auto IC_ph = [&] {
+            AFTERGLOW_PROFILE_SCOPE(ic_photons);
+            return generate_IC_photons(syn_e, syn_ph, rad.kn, coord);
+        }();
+        {
+            AFTERGLOW_PROFILE_SCOPE(ssc_flux);
+            emission.ssc = std::invoke(flux_func, obs, t_obs, nu_obs, IC_ph);
+        }
     }
 }
 
 template <typename Func>
 auto PyModel::compute_emission(Array const& t_obs, Array const& nu_obs, Func&& flux_func) -> PyFlux {
-    Coord coord = auto_grid(jet_, t_obs, this->theta_w, obs_setup.theta_obs, obs_setup.z, phi_resol, theta_resol,
-                            t_resol, axisymmetric);
+    AFTERGLOW_PROFILE_SCOPE(total);
 
     PyFlux flux;
-
     Observer observer;
 
     if (!rvs_rad_opt) {
-        auto fwd_shock = generate_fwd_shock(coord, medium_, jet_, fwd_rad.rad, rtol);
-
+        auto [coord, fwd_shock] = [&] {
+            AFTERGLOW_PROFILE_SCOPE(dynamics);
+            return solve_fwd_shock(jet_, medium_, t_obs, theta_w, obs_setup.theta_obs, obs_setup.z, phi_resol,
+                                   theta_resol, t_resol, axisymmetric, fwd_rad.rad, rtol);
+        }();
         single_shock_emission(fwd_shock, coord, t_obs, nu_obs, observer, fwd_rad, flux.fwd,
                               std::forward<Func>(flux_func));
-
-        return flux;
     } else {
-        auto rvs_rad = *rvs_rad_opt;
-        auto [fwd_shock, rvs_shock] = generate_shock_pair(coord, medium_, jet_, fwd_rad.rad, rvs_rad.rad, rtol);
-
+        auto [coord, fwd_shock, rvs_shock] = [&] {
+            AFTERGLOW_PROFILE_SCOPE(dynamics);
+            return solve_shock_pair(jet_, medium_, t_obs, theta_w, obs_setup.theta_obs, obs_setup.z, phi_resol,
+                                    theta_resol, t_resol, axisymmetric, fwd_rad.rad, rvs_rad_opt->rad, rtol);
+        }();
         single_shock_emission(fwd_shock, coord, t_obs, nu_obs, observer, fwd_rad, flux.fwd,
                               std::forward<Func>(flux_func));
-
-        single_shock_emission(rvs_shock, coord, t_obs, nu_obs, observer, rvs_rad, flux.rvs,
+        single_shock_emission(rvs_shock, coord, t_obs, nu_obs, observer, *rvs_rad_opt, flux.rvs,
                               std::forward<Func>(flux_func));
-
-        return flux;
     }
+    return flux;
 }

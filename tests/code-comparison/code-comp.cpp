@@ -1,6 +1,7 @@
 #include <boost/numeric/odeint.hpp>
 #include <filesystem>
 #include <fstream>
+#include <thread>
 
 #include "afterglow.h"
 #include "json.hpp"
@@ -34,6 +35,9 @@ void lc_gen(std::string folder_name, bool out = false) {
     Real theta_view = data["theta_view"];
 
     std::vector<Real> t_obs = data["t_obs"];
+    if (t_obs.size() < 2) {
+        throw std::runtime_error("t_obs must contain at least two entries");
+    }
 
     std::vector<Real> band_pass_ = data["band pass (kev)"];
 
@@ -54,18 +58,18 @@ void lc_gen(std::string folder_name, bool out = false) {
     }
     jet.spreading = false;
 
-    Coord coord = auto_grid(jet, t_bins, theta_w, theta_view, z);
+    Coord coord = auto_grid(jet, medium, t_bins, theta_w, theta_view, z, false, 0.5, 0.5, 20, true, 48);
 
     // solve dynamics
     Shock f_shock = generate_fwd_shock(coord, medium, jet, rad_fwd);
 
     Observer obs;
 
-    obs.observe_at(t_bins, coord, f_shock, lumi_dist, z);
+    obs.observe(coord, f_shock, lumi_dist, z);
 
-    auto syn_e = generate_syn_electrons(f_shock);
+    auto syn_e = generate_syn_electrons(f_shock, coord);
 
-    auto syn_ph = generate_syn_photons(f_shock, syn_e);
+    auto syn_ph = generate_syn_photons(f_shock, syn_e, coord, medium);
 
     if (out) {
         write_npz("coord", coord);

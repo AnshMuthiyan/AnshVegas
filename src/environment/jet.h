@@ -221,7 +221,7 @@ class PowerLawJet {
      * @return Energy per solid angle with power-law angular dependence
      * <!-- ************************************************************************************** -->
      */
-    inline Real eps_k(Real phi, Real theta) const noexcept { return eps_k_ / fast_pow(1 + fast_pow(theta / theta_c_, k_e_), -s/2); }
+    inline Real eps_k(Real phi, Real theta) const noexcept { return eps_k_ * fast_pow(1 + fast_pow(theta / theta_c_, k_e_), -s/2); }
     /**
      * <!-- ************************************************************************************** -->
      * @brief Initial Lorentz factor as a function of phi and theta, with power-law falloff
@@ -231,7 +231,7 @@ class PowerLawJet {
      * <!-- ************************************************************************************** -->
      */
     inline Real Gamma0(Real phi, Real theta) const noexcept {
-        return (Gamma0_ - 1) / fast_pow((1 + fast_pow(theta / theta_c_, k_g_)), -s/2) + 1;
+        return (Gamma0_ - 1) * fast_pow((1 + fast_pow(theta / theta_c_, k_g_)), -s/2) + 1;
     }
 
     /// Duration of the ejecta in seconds

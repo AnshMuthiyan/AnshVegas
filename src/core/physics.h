@@ -109,31 +109,39 @@ namespace physics {
  * @return The deceleration radius
  * <!-- ************************************************************************************** -->
  */
-        Real dec_radius(Real E_iso, Real n_ism, Real Gamma0, Real engine_dura);
+        Real dec_radius(Real E_iso, Real n0, Real Gamma0, Real engine_dura, Real k = 0.0, Real r0 = 1.0);
 
         /**
  * <!-- ************************************************************************************** -->
- * @brief Computes the deceleration radius for the thin shell case.
- * @details Uses the formula: R_dec = [3E_iso / (4π n_ism mp c^2 Gamma0^2)]^(1/3)
+ * @brief Computes the thin-shell deceleration radius for a power-law density medium.
+ * @details For ρ = n0 mp (r/r0)^{-k}, the deceleration radius is
+ *          R_dec = [(3-k) E_iso / (4π n0 mp r0^k c² Γ₀²)]^{1/(3-k)}.
+ *          Defaults k=0, r0=1 reproduce the standard ISM formula.
  * @param E_iso Isotropic energy
- * @param n_ism ISM density
+ * @param n0 Number density at reference radius r0 (cm^-3)
  * @param Gamma0 Initial Lorentz factor
+ * @param k Density power-law index (default 0 = ISM)
+ * @param r0 Reference radius in cm (default 1 cm, i.e. pure ISM)
  * @return The thin shell deceleration radius
  * <!-- ************************************************************************************** -->
  */
-        Real thin_shell_dec_radius(Real E_iso, Real n_ism, Real Gamma0);
+        Real thin_shell_dec_radius(Real E_iso, Real n0, Real Gamma0, Real k = 0.0, Real r0 = 1.0);
 
         /**
  * <!-- ************************************************************************************** -->
- * @brief Computes the deceleration radius for the thick shell case.
- * @details Uses the formula: R_dec = [3 E_iso engine_dura c / (4π n_ism mp c^2)]^(1/4)
+ * @brief Computes the thick-shell deceleration radius for a power-law density medium.
+ * @details For ρ = n0 mp (r/r0)^{-k}, the deceleration radius is
+ *          R_dec = [(3-k) E_iso c T / (4π n0 mp r0^k c²)]^{1/(4-k)}.
+ *          Defaults k=0, r0=1 reproduce the standard ISM formula.
  * @param E_iso Isotropic energy
- * @param n_ism ISM density
+ * @param n0 Number density at reference radius r0 (cm^-3)
  * @param engine_dura Engine duration
+ * @param k Density power-law index (default 0 = ISM)
+ * @param r0 Reference radius in cm (default 1 cm, i.e. pure ISM)
  * @return The thick shell deceleration radius
  * <!-- ************************************************************************************** -->
  */
-        Real thick_shell_dec_radius(Real E_iso, Real n_ism, Real engine_dura);
+        Real thick_shell_dec_radius(Real E_iso, Real n0, Real engine_dura, Real k = 0.0, Real r0 = 1.0);
 
         /**
  * <!-- ************************************************************************************** -->

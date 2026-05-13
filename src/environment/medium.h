@@ -96,32 +96,51 @@ class Wind {
      * @param n0 number density of wind at small radii
      * <!-- ************************************************************************************** -->
      */
-    explicit Wind(Real A_star, Real n_ism = 0, Real n0 = con::inf) noexcept
-        : A(A_star * 5e11 * unit::g / unit::cm), rho_ism(n_ism * con::mp), r02(A / (n0 * 1.3 * con::mp)) {}
+    explicit Wind(Real A_star, Real n_ism = 0, Real n0 = con::inf, Real k = 2) noexcept
+        : A(A_star * 5e11 * unit::g / unit::cm * std::pow(1e17 * unit::cm, k - 2)),
+          rho_ism(n_ism * con::mp),
+          r0k_(A / (n0 * 1.3 * con::mp)),
+          k_(k) {}
 
     /**
      * <!-- ************************************************************************************** -->
-     * @brief Return density at given positions (proportional to 1/r²)
+     * @brief Return density at given positions (proportional to r^{-k})
      * @param phi Azimuthal angle (unused)
      * @param theta Polar angle (unused)
      * @param r Radial distance
-     * @return Density value at radius r (= A/r²)
+     * @return Density value at radius r (= A/(r0k + r^k) + rho_ism)
      * <!-- ************************************************************************************** -->
      */
 
     [[nodiscard]] inline Real rho(Real /*phi*/, Real /*theta*/, Real r) const noexcept {
-        return A / (r02 + r * r) + rho_ism;
+        return A / (r0k_ + std::pow(r, k_)) + rho_ism;
     }
 
-    /// Enclosed mass per solid angle up to radius r.
+    /// Enclosed mass per solid angle up to radius r: ∫₀^r ρ(r') r'² dr'.
     [[nodiscard]] inline Real mass(Real r) const noexcept {
         Real m = rho_ism * r * r * r / 3.0;
         if (A != 0) {
-            if (r02 > 0) {
-                const Real a = std::sqrt(r02);
+            if (r0k_ == 0) {
+                // Pure power law: ∫₀^r A/r'^k * r'² dr' = A * r^{3-k} / (3-k)
+                m += A * std::pow(r, 3 - k_) / (3 - k_);
+            } else if (k_ == 2) {
+                // k=2 softcore analytic: ∫₀^r r'²/(r0k+r'²) dr' = r - sqrt(r0k)*atan(r/sqrt(r0k))
+                const Real a = std::sqrt(r0k_);
                 m += A * (r - a * std::atan(r / a));
             } else {
-                m += A * r;
+                // General softcore: 32-point Simpson integration in log-space
+                constexpr size_t N = 32;
+                const Real u_max = std::log(r);
+                const Real u_min = u_max - 18;
+                const Real h = (u_max - u_min) / N;
+                auto f = [&](Real u) noexcept {
+                    const Real ri = std::exp(u);
+                    return ri * ri * ri / (r0k_ + std::pow(ri, k_));
+                };
+                Real sum = f(u_min) + f(u_max);
+                for (size_t i = 1; i < N; i += 2) sum += 4 * f(u_min + i * h);
+                for (size_t i = 2; i < N; i += 2) sum += 2 * f(u_min + i * h);
+                m += A * sum * h / 3;
             }
         }
         return m;
@@ -130,14 +149,16 @@ class Wind {
     /// Expose parameters for analytic integrals in hot dynamics setup paths.
     [[nodiscard]] inline Real A_param() const noexcept { return A; }
     [[nodiscard]] inline Real rho_ism_param() const noexcept { return rho_ism; }
-    [[nodiscard]] inline Real r02_param() const noexcept { return r02; }
+    [[nodiscard]] inline Real r0k_param() const noexcept { return r0k_; }
+    [[nodiscard]] inline Real k_param() const noexcept { return k_; }
 
     bool isotropic{true}; ///< Flag indicating if the medium is isotropic within computational domain.
 
   private:
-    Real A{0};       ///< Wind density parameter in physical units
-    Real rho_ism{0}; ///< ISM density floor
-    Real r02{0};     ///< Radius where ISM transitions to
+    Real A{0};        ///< Wind density parameter in physical units (units of g/cm^{3-k})
+    Real rho_ism{0};  ///< ISM density floor
+    Real r0k_{0};     ///< Softcore: r^k at which density transitions from const to power-law (= A/(n0*1.3*mp))
+    Real k_{2};       ///< Density power-law slope: ρ ∝ r^{-k}
 };
 
 /// Type-erased medium variant for optimized dispatch in the ODE hot loop.
@@ -201,11 +222,10 @@ class powerLaw {
        return n * X *con::mp;
       }
 
-  private:
-    Real n0{1};       ///< Wind density parameter in physical units
-    Real k{2}; ///< ISM density floor
-    Real r0{1e17};
-    Real X{0.7};     ///< Radius where ISM transitions to
+    Real n0{1};    ///< Number density at reference radius r0 (cm^-3)
+    Real k{2};     ///< Power-law slope: rho ∝ r^{-k}
+    Real r0{1e17}; ///< Reference radius (cm)
+    Real X{0.7};   ///< Hydrogen mass fraction
 };
 
 /**

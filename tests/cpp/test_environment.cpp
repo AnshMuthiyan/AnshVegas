@@ -50,7 +50,7 @@ BOOST_AUTO_TEST_CASE(wind_density_r_squared) {
     Real A = A_star * 5e11 * unit::g / unit::cm;
 
     Real r = 1e18;
-    Real expected = A / (r * r); // r02 = 0 when n0 = inf
+    Real expected = A / (r * r); // r0k_ = 0 when n0 = inf
     BOOST_CHECK_CLOSE(wind.rho(0, 0, r), expected, 1e-6);
 }
 
@@ -68,13 +68,13 @@ BOOST_AUTO_TEST_CASE(wind_density_floor) {
 }
 
 BOOST_AUTO_TEST_CASE(wind_mass_linear) {
-    // Wind(A_star, 0) with n0=inf gives r02=0, so mass ~ A*r for large r
+    // Wind(A_star, 0) with n0=inf gives r0k_=0, so mass ~ A*r for large r (k=2)
     Real A_star = 1.0;
     Wind wind(A_star, 0, con::inf);
     Real A = A_star * 5e11 * unit::g / unit::cm;
 
     Real r = 1e18;
-    Real expected = A * r; // no ISM term, r02=0
+    Real expected = A * r; // no ISM term, r0k_=0, k=2 → mass = A*r^{3-k}/(3-k) = A*r
     BOOST_CHECK_CLOSE(wind.mass(r), expected, 1e-10);
 }
 
@@ -101,12 +101,12 @@ BOOST_AUTO_TEST_CASE(wind_zero_A_star) {
 }
 
 BOOST_AUTO_TEST_CASE(wind_very_small_r) {
-    // When n0 is finite, r02 > 0 prevents divergence at r -> 0
+    // When n0 is finite, r0k_ > 0 prevents divergence at r -> 0
     Real A_star = 1.0;
     Real n0 = 1e6; // finite floor density
     Wind wind(A_star, 0, n0);
     Real rho_at_zero = wind.rho(0, 0, 0.0);
-    // Should be finite (A / r02) since r02 > 0
+    // Should be finite (A / r0k_) since r0k_ > 0
     BOOST_CHECK(std::isfinite(rho_at_zero));
     BOOST_CHECK_GT(rho_at_zero, 0.0);
 }

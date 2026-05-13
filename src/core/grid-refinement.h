@@ -391,6 +391,14 @@ Real estimate_t_dec(Ejecta const& jet, Medium const& medium, Real phi, Real thet
             return std::min(r_dec, r_max) * (1 - beta) / (beta * con::c);
         }
         return r_max * (1 - beta) / (beta * con::c);
+    } else if constexpr (std::is_same_v<Medium, powerLaw>) {
+        // Analytical: m(r) = n0 X mp r0^k / (3-k) * r^{3-k}
+        // Solve m(r_dec) = target → r_dec = [(3-k)*target / (n0 X mp r0^k)]^{1/(3-k)}
+        const Real k_val  = medium.k;
+        const Real r0k    = std::pow(medium.r0, k_val);
+        const Real rhs    = (3 - k_val) * target / (medium.n0 * medium.X * con::mp * r0k);
+        const Real r_dec  = std::pow(std::max(rhs, 0.0), 1.0 / (3 - k_val));
+        return std::min(r_dec, r_max) * (1 - beta) / (beta * con::c);
     }
 
     auto rho = [&](Real r) { return medium.rho(phi, theta, r); };
